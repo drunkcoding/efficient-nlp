@@ -1,6 +1,8 @@
 import csv
 import os
 import sys
+import pandas as pd
+import numpy as np
 
 class DataProcessor(object):
     """Base class for data converters for sequence classification data sets."""
@@ -60,6 +62,8 @@ class InputFeatures(object):
         self.segment_ids = segment_ids
         self.label_id = label_id
 
+
+na_list = ["*", "*?", "??", "?*"]
 
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
@@ -156,11 +160,25 @@ class ColaProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "train.tsv")), "train"
         )
 
+    def get_train_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, names=["misc", "label", "misc2", "sentence"])[["label", "sentence"]]
+        # print(tsv)
+        # exit()
+        tsv = tsv.dropna()
+        # tsv['label'] = tsv['label'].astype(float)
+        return tsv
+
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev"
         )
+
+    def get_dev_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, names=["misc", "label", "misc2", "sentence"])[["label", "sentence"]]
+        tsv = tsv.dropna()
+        # tsv['label'] = tsv['label'].astype(float)
+        return tsv
 
     def get_labels(self):
         """See base class."""
@@ -189,11 +207,23 @@ class Sst2Processor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "train.tsv")), "train"
         )
 
+    def get_train_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0)[["label", "sentence"]]
+        tsv = tsv.dropna()
+        # tsv['label'] = tsv['label'].astype(float)
+        return tsv
+
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev"
         )
+
+    def get_dev_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)[["label", "sentence"]]
+        tsv = tsv.dropna()
+        # tsv['label'] = tsv['label'].astype(float)
+        return tsv
 
     def get_labels(self):
         """See base class."""
@@ -260,11 +290,27 @@ class QqpProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "train.tsv")), "train"
         )
 
+    def get_train_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['sentence'] = tsv.question1 + " [SEP] " + tsv.question2
+        tsv = tsv.rename(columns={"is_duplicate": "label"})
+        tsv = tsv[["label", "sentence"]]
+        return tsv
+
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev"
         )
+
+    def get_dev_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['sentence'] = tsv.question1 + " [SEP] " + tsv.question2
+        tsv = tsv.rename(columns={"is_duplicate": "label"})
+        tsv = tsv[["label", "sentence"]]
+        return tsv
 
     def get_labels(self):
         """See base class."""
@@ -299,11 +345,29 @@ class QnliProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "train.tsv")), "train"
         )
 
+    def get_train_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0, error_bad_lines=False)
+        tsv = tsv.dropna()
+        tsv['num_label'] = np.where(tsv.label == 'not_entailment', 1, 0)
+        tsv['sentence'] = tsv.question + " [SEP] " + tsv.sentence
+        tsv = tsv[["num_label", "sentence"]]
+        tsv = tsv.rename(columns={'num_label': 'label'})
+        return tsv
+
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev_matched"
         )
+
+    def get_dev_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0, error_bad_lines=False)
+        tsv = tsv.dropna()
+        tsv['num_label'] = np.where(tsv.label == 'not_entailment', 1, 0)
+        tsv['sentence'] = tsv.question + " [SEP] " + tsv.sentence
+        tsv = tsv[["num_label", "sentence"]]
+        tsv = tsv.rename(columns={'num_label': 'label'})
+        return tsv
 
     def get_labels(self):
         """See base class."""
@@ -335,11 +399,29 @@ class RteProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "train.tsv")), "train"
         )
 
+    def get_train_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['num_label'] = np.where(tsv.label == 'not_entailment', 1, 0)
+        tsv['sentence'] = tsv.sentence1 + " [SEP] " + tsv.sentence2
+        tsv = tsv[["num_label", "sentence"]]
+        tsv = tsv.rename(columns={'num_label': 'label'})
+        return tsv
+
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev"
         )
+
+    def get_dev_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['num_label'] = np.where(tsv.label == 'not_entailment', 1, 0)
+        tsv['sentence'] = tsv.sentence1 + " [SEP] " + tsv.sentence2
+        tsv = tsv[["num_label", "sentence"]]
+        tsv = tsv.rename(columns={'num_label': 'label'})
+        return tsv
 
     def get_labels(self):
         """See base class."""
@@ -371,11 +453,25 @@ class WnliProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "train.tsv")), "train"
         )
 
+    def get_train_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['sentence'] = tsv.sentence1 + " [SEP] " + tsv.sentence2
+        tsv = tsv[["label", "sentence"]]
+        return tsv
+
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev"
         )
+
+    def get_dev_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['sentence'] = tsv.sentence1 + " [SEP] " + tsv.sentence2
+        tsv = tsv[["label", "sentence"]]
+        return tsv
 
     def get_labels(self):
         """See base class."""
@@ -425,10 +521,10 @@ output_modes = {
 
 bert_base_model_config = {
     "vocab_size_or_config_json_file": 119547,
-    "hidden_size": 1024,
-    "num_hidden_layers": 24,
+    "hidden_size": 768,
+    "num_hidden_layers": 12,
     "num_attention_heads": 16,
-    "intermediate_size": 4096,
+    "intermediate_size": 3072,
     "hidden_act": "gelu",
     "hidden_dropout_prob": 0.1,
     "attention_probs_dropout_prob": 0.1,

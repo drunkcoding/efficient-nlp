@@ -15,8 +15,7 @@ LR=$3
 NUM_EPOCH=$4
 base_dir=`pwd`
 JOBNAME=$5
-CHECKPOINT_PATH=$6
-model_name=$7
+model_name="bert-large-uncased"
 OUTPUT_DIR="${SCRIPT_DIR}/outputs/${model_name}/${JOBNAME}_bsz${EFFECTIVE_BATCH_SIZE}_lr${LR}_epoch${NUM_EPOCH}"
 
 GLUE_DIR="/data/GlueData"
@@ -32,30 +31,18 @@ fi
 # python -m torch.distributed.launch --nproc_per_node=${NGPU} \ --master_port=12346 \
 
 echo "Fine Tuning $CHECKPOINT_PATH"
-run_cmd="python -m torch.distributed.launch \
-       --nproc_per_node=1 \
-       --master_addr=192.168.5.11 \
-       --master_port=49000 \
-       bert_finetune.py \
+run_cmd="python bert-large-finetune.py \
        --task_name $TASK \
-       --do_train \
-       --do_eval \
-       --deepspeed \
-       --deepspeed_transformer_kernel \
        --fp16 \
-       --preln \
-       --random \
-       --deepspeed_config ${model_name}.json \
        --do_lower_case \
        --data_dir $GLUE_DIR/$TASK/ \
-       --bert_model ${model_name} \
        --max_seq_length 512 \
        --train_batch_size ${PER_GPU_BATCH_SIZE} \
        --gradient_accumulation_steps ${GRAD_ACCUM_STEPS} \
        --learning_rate ${LR} \
        --num_train_epochs ${NUM_EPOCH} \
        --output_dir ${OUTPUT_DIR}_${TASK} \
-       --model_dir ${CHECKPOINT_PATH} &> ${LOG_DIR}/${model_name}/${JOBNAME}_${TASK}_bzs${EFFECTIVE_BATCH_SIZE}_lr${LR}_epoch${NUM_EPOCH}_${NGPU}_deepspeed-kernel.log
+       &> ${LOG_DIR}/${model_name}/${JOBNAME}_${TASK}_bzs${EFFECTIVE_BATCH_SIZE}_lr${LR}_epoch${NUM_EPOCH}_${NGPU}_deepspeed-kernel.log
        "
 echo ${run_cmd}
 eval ${run_cmd}

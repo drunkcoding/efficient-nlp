@@ -149,6 +149,8 @@ def checkpoint_model(
     # success = model.network.save_checkpoint(PATH, ckpt_id,
     success = model.save_checkpoint(PATH, ckpt_id, checkpoint_state_dict)
     status_msg = "checkpointing: PATH={}, ckpt_id={}".format(PATH, ckpt_id)
+
+    # model.save_pretrained(PATH)
     if success:
         logging.info(f"Success {status_msg}")
     else:
