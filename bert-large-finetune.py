@@ -150,7 +150,10 @@ num_labels = len(label_list)
 model_name = "/home/oai/share/HuggingFace/bert-large-uncased/"
 
 tokenizer = BertTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
-model=BertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
+
+
+def model_init():
+    return BertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
 
 
 # train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=max_length)
@@ -160,7 +163,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=args.train_batch_size,  # batch size per device during training
     weight_decay=0.01,               # strength of weight decay
     load_best_model_at_end=True,
-    logging_steps=100,
+    logging_steps=250,
     evaluation_strategy="steps",
     output_dir=args.output_dir,
     learning_rate=args.learning_rate,
@@ -194,180 +197,186 @@ print(train_texts.head())
 train_dataset = Dataset(encoded_train_texts, torch.tensor(train_texts['label']))
 eval_dataset = Dataset(encoded_dev_texts, torch.tensor(dev_texts['label']))
 
+def metrics(eval_pred):
+    predictions, labels = eval_pred
+    predictions = np.argmax(predictions, axis=1)
+    return compute_metrics(args.task_name.lower(), predictions, labels)
+
 # -------------  Model Training --------------
-trainer = Trainer(model=model,args=training_args,train_dataset=train_dataset, eval_dataset=eval_dataset)
+trainer = Trainer(model_init=model_init,compute_metrics=metrics,args=training_args,train_dataset=train_dataset, eval_dataset=eval_dataset)
+trainer.hyperparameter_search(direction="maximize")
 trainer.train()
 
-# eval_dataset = TensorDataset(encoded_texts)
-eval_sampler = SequentialSampler(eval_dataset)
-eval_dataloader = DataLoader(
-    eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size
-)
+# # eval_dataset = TensorDataset(encoded_texts)
+# eval_sampler = SequentialSampler(eval_dataset)
+# eval_dataloader = DataLoader(
+#     eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size
+# )
 
-logger.info("***** Running evaluation *****")
-logger.info("  Num examples = %d", len(encoded_texts['labels']))
-logger.info("  Batch size = %d", args.eval_batch_size)
+# logger.info("***** Running evaluation *****")
+# logger.info("  Num examples = %d", len(encoded_texts['labels']))
+# logger.info("  Batch size = %d", args.eval_batch_size)
 
-model.eval()
-eval_loss = 0
-nb_eval_steps = 0
-preds = []
+# model.eval()
+# eval_loss = 0
+# nb_eval_steps = 0
+# preds = []
 
-for input_ids, attention_mask, labels in tqdm(
-    eval_dataloader, desc="Evaluating"
-):
-    input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
-    labels = labels.to(device)
+# for input_ids, attention_mask, labels in tqdm(
+#     eval_dataloader, desc="Evaluating"
+# ):
+#     input_ids = input_ids.to(device)
+#     attention_mask = attention_mask.to(device)
+#     labels = labels.to(device)
 
-    with torch.no_grad():
-        logits = model(input_ids=input_ids, attention_mask=attention_mask, labels=None).logits
+#     with torch.no_grad():
+#         logits = model(input_ids=input_ids, attention_mask=attention_mask, labels=None).logits
 
-    # create eval loss and other metric required by the task
-    if output_mode == "classification":
-        loss_fct = CrossEntropyLoss()
-        tmp_eval_loss = loss_fct(
-            logits.view(-1, num_labels), label_ids.view(-1)
-        )
-    elif output_mode == "regression":
-        loss_fct = MSELoss()
-        print(logits.type())
-        print(label_ids.type())
-        if task_name == "sts-b":
-            tmp_eval_loss = loss_fct(
-                logits.float().view(-1), label_ids.view(-1)
-            )
-        else:
-            tmp_eval_loss = loss_fct(logits.view(-1), label_ids.view(-1))
-    logger.debug("tmp_eval_loss %s", tmp_eval_loss.mean().item())
-    eval_loss += tmp_eval_loss.mean().item()
-    nb_eval_steps += 1
-    if len(preds) == 0:
-        preds.append(logits.detach().cpu().numpy())
-    else:
-        preds[0] = np.append(
-            preds[0], logits.detach().cpu().numpy(), axis=0)
+#     # create eval loss and other metric required by the task
+#     if output_mode == "classification":
+#         loss_fct = CrossEntropyLoss()
+#         tmp_eval_loss = loss_fct(
+#             logits.view(-1, num_labels), label_ids.view(-1)
+#         )
+#     elif output_mode == "regression":
+#         loss_fct = MSELoss()
+#         print(logits.type())
+#         print(label_ids.type())
+#         if task_name == "sts-b":
+#             tmp_eval_loss = loss_fct(
+#                 logits.float().view(-1), label_ids.view(-1)
+#             )
+#         else:
+#             tmp_eval_loss = loss_fct(logits.view(-1), label_ids.view(-1))
+#     logger.debug("tmp_eval_loss %s", tmp_eval_loss.mean().item())
+#     eval_loss += tmp_eval_loss.mean().item()
+#     nb_eval_steps += 1
+#     if len(preds) == 0:
+#         preds.append(logits.detach().cpu().numpy())
+#     else:
+#         preds[0] = np.append(
+#             preds[0], logits.detach().cpu().numpy(), axis=0)
 
-logger.debug("eval_loss %s, nb_eval_steps %s", eval_loss, nb_eval_steps)
-logger.debug("tr_loss %s, nb_tr_steps %s", tr_loss, nb_tr_steps)
-eval_loss = eval_loss / nb_eval_steps
-preds = preds[0]
-if output_mode == "classification":
-    preds = np.argmax(preds, axis=1)
-elif output_mode == "regression":
-    preds = np.squeeze(preds)
-result = compute_metrics(task_name, preds, all_label_ids.numpy())
-loss = tr_loss / nb_tr_steps if args.do_train else None
+# logger.debug("eval_loss %s, nb_eval_steps %s", eval_loss, nb_eval_steps)
+# logger.debug("tr_loss %s, nb_tr_steps %s", tr_loss, nb_tr_steps)
+# eval_loss = eval_loss / nb_eval_steps
+# preds = preds[0]
+# if output_mode == "classification":
+#     preds = np.argmax(preds, axis=1)
+# elif output_mode == "regression":
+#     preds = np.squeeze(preds)
+# result = compute_metrics(task_name, preds, all_label_ids.numpy())
+# loss = tr_loss / nb_tr_steps if args.do_train else None
 
-result["eval_loss"] = eval_loss
-result["global_step"] = global_step
-result["loss"] = loss
+# result["eval_loss"] = eval_loss
+# result["global_step"] = global_step
+# result["loss"] = loss
 
-output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
-with open(output_eval_file, "w") as writer:
-    logger.info("***** Eval results *****")
-    for key in sorted(result.keys()):
-        logger.info("  %s = %s", key, str(result[key]))
-        writer.write("%s = %s\n" % (key, str(result[key])))
+# output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
+# with open(output_eval_file, "w") as writer:
+#     logger.info("***** Eval results *****")
+#     for key in sorted(result.keys()):
+#         logger.info("  %s = %s", key, str(result[key]))
+#         writer.write("%s = %s\n" % (key, str(result[key])))
 
-# hack for MNLI-MM
-if task_name == "mnli":
-    task_name = "mnli-mm"
-    processor = processors[task_name]()
+# # hack for MNLI-MM
+# if task_name == "mnli":
+#     task_name = "mnli-mm"
+#     processor = processors[task_name]()
 
-    if (
-        os.path.exists(args.output_dir + "-MM")
-        and os.listdir(args.output_dir + "-MM")
-        and args.do_train
-    ):
-        raise ValueError(
-            "Output directory ({}{}) already exists and is not empty.".format(
-                args.output_dir, "-MM"
-            )
-        )
-    if not os.path.exists(args.output_dir + "-MM"):
-        os.makedirs(args.output_dir + "-MM")
+#     if (
+#         os.path.exists(args.output_dir + "-MM")
+#         and os.listdir(args.output_dir + "-MM")
+#         and args.do_train
+#     ):
+#         raise ValueError(
+#             "Output directory ({}{}) already exists and is not empty.".format(
+#                 args.output_dir, "-MM"
+#             )
+#         )
+#     if not os.path.exists(args.output_dir + "-MM"):
+#         os.makedirs(args.output_dir + "-MM")
 
-    eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features = convert_examples_to_features(
-        eval_examples, label_list, args.max_seq_length, tokenizer, output_mode
-    )
-    logger.info("***** Running evaluation *****")
-    logger.info("  Num examples = %d", len(eval_examples))
-    logger.info("  Batch size = %d", args.eval_batch_size)
-    all_input_ids = torch.tensor(
-        [f.input_ids for f in eval_features], dtype=torch.long
-    )
-    all_input_mask = torch.tensor(
-        [f.input_mask for f in eval_features], dtype=torch.long
-    )
-    all_segment_ids = torch.tensor(
-        [f.segment_ids for f in eval_features], dtype=torch.long
-    )
-    all_label_ids = torch.tensor(
-        [f.label_id for f in eval_features], dtype=torch.long
-    )
+#     eval_examples = processor.get_dev_examples(args.data_dir)
+#     eval_features = convert_examples_to_features(
+#         eval_examples, label_list, args.max_seq_length, tokenizer, output_mode
+#     )
+#     logger.info("***** Running evaluation *****")
+#     logger.info("  Num examples = %d", len(eval_examples))
+#     logger.info("  Batch size = %d", args.eval_batch_size)
+#     all_input_ids = torch.tensor(
+#         [f.input_ids for f in eval_features], dtype=torch.long
+#     )
+#     all_input_mask = torch.tensor(
+#         [f.input_mask for f in eval_features], dtype=torch.long
+#     )
+#     all_segment_ids = torch.tensor(
+#         [f.segment_ids for f in eval_features], dtype=torch.long
+#     )
+#     all_label_ids = torch.tensor(
+#         [f.label_id for f in eval_features], dtype=torch.long
+#     )
 
-    eval_data = TensorDataset(
-        all_input_ids, all_input_mask, all_segment_ids, all_label_ids
-    )
-    # Run prediction for full data
-    eval_sampler = SequentialSampler(eval_data)
-    eval_dataloader = DataLoader(
-        eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size
-    )
+#     eval_data = TensorDataset(
+#         all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+#     )
+#     # Run prediction for full data
+#     eval_sampler = SequentialSampler(eval_data)
+#     eval_dataloader = DataLoader(
+#         eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size
+#     )
 
-    model.eval()
-    eval_loss = 0
-    nb_eval_steps = 0
-    preds = []
+#     model.eval()
+#     eval_loss = 0
+#     nb_eval_steps = 0
+#     preds = []
 
-    for input_ids, input_mask, segment_ids, label_ids in tqdm(
-        eval_dataloader, desc="Evaluating"
-    ):
-        input_ids = input_ids.to(device)
-        input_mask = input_mask.to(device)
-        segment_ids = segment_ids.to(device)
-        label_ids = label_ids.to(device)
+#     for input_ids, input_mask, segment_ids, label_ids in tqdm(
+#         eval_dataloader, desc="Evaluating"
+#     ):
+#         input_ids = input_ids.to(device)
+#         input_mask = input_mask.to(device)
+#         segment_ids = segment_ids.to(device)
+#         label_ids = label_ids.to(device)
 
-        with torch.no_grad():
-            logits = model(input_ids, segment_ids, input_mask, labels=None)
+#         with torch.no_grad():
+#             logits = model(input_ids, segment_ids, input_mask, labels=None)
 
-        if args.focal:
-            loss_fct = FocalLoss(class_num=num_labels, gamma=args.gamma)
-        else:
-            loss_fct = CrossEntropyLoss()
-        tmp_eval_loss = loss_fct(
-            logits.view(-1, num_labels), label_ids.view(-1)
-        )
-        logger.debug("tmp_eval_loss %s", tmp_eval_loss)
-        logger.debug("logits %s %s %s, label_ids %s", logits,
-                        logits.view(-1), logits.view(-1, num_labels), label_ids.view(-1))
-        eval_loss += tmp_eval_loss.mean().item()
-        nb_eval_steps += 1
-        if len(preds) == 0:
-            preds.append(logits.detach().cpu().numpy())
-        else:
-            preds[0] = np.append(
-                preds[0], logits.detach().cpu().numpy(), axis=0
-            )
-    logger.debug("eval_loss %s, nb_eval_steps %s",
-                    eval_loss, nb_eval_steps)
-    logger.debug("tr_loss %s, nb_tr_steps %s", tr_loss, nb_tr_steps)
-    eval_loss = eval_loss / nb_eval_steps
-    preds = preds[0]
-    preds = np.argmax(preds, axis=1)
-    result = compute_metrics(task_name, preds, all_label_ids.numpy())
-    loss = tr_loss / nb_tr_steps if args.do_train else None
+#         if args.focal:
+#             loss_fct = FocalLoss(class_num=num_labels, gamma=args.gamma)
+#         else:
+#             loss_fct = CrossEntropyLoss()
+#         tmp_eval_loss = loss_fct(
+#             logits.view(-1, num_labels), label_ids.view(-1)
+#         )
+#         logger.debug("tmp_eval_loss %s", tmp_eval_loss)
+#         logger.debug("logits %s %s %s, label_ids %s", logits,
+#                         logits.view(-1), logits.view(-1, num_labels), label_ids.view(-1))
+#         eval_loss += tmp_eval_loss.mean().item()
+#         nb_eval_steps += 1
+#         if len(preds) == 0:
+#             preds.append(logits.detach().cpu().numpy())
+#         else:
+#             preds[0] = np.append(
+#                 preds[0], logits.detach().cpu().numpy(), axis=0
+#             )
+#     logger.debug("eval_loss %s, nb_eval_steps %s",
+#                     eval_loss, nb_eval_steps)
+#     logger.debug("tr_loss %s, nb_tr_steps %s", tr_loss, nb_tr_steps)
+#     eval_loss = eval_loss / nb_eval_steps
+#     preds = preds[0]
+#     preds = np.argmax(preds, axis=1)
+#     result = compute_metrics(task_name, preds, all_label_ids.numpy())
+#     loss = tr_loss / nb_tr_steps if args.do_train else None
 
-    result["eval_loss"] = eval_loss
-    result["global_step"] = global_step
-    result["loss"] = loss
+#     result["eval_loss"] = eval_loss
+#     result["global_step"] = global_step
+#     result["loss"] = loss
 
-    output_eval_file = os.path.join(
-        args.output_dir + "-MM", "eval_results.txt")
-    with open(output_eval_file, "w") as writer:
-        logger.info("***** Eval results *****")
-        for key in sorted(result.keys()):
-            logger.info("  %s = %s", key, str(result[key]))
-            writer.write("%s = %s\n" % (key, str(result[key])))
+#     output_eval_file = os.path.join(
+#         args.output_dir + "-MM", "eval_results.txt")
+#     with open(output_eval_file, "w") as writer:
+#         logger.info("***** Eval results *****")
+#         for key in sorted(result.keys()):
+#             logger.info("  %s = %s", key, str(result[key]))
+#             writer.write("%s = %s\n" % (key, str(result[key])))

@@ -180,6 +180,12 @@ class ColaProcessor(DataProcessor):
         # tsv['label'] = tsv['label'].astype(float)
         return tsv
 
+    def get_test_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv = tsv.rename()
+        return tsv
+
     def get_labels(self):
         """See base class."""
         return ["0", "1"]
@@ -346,7 +352,7 @@ class QnliProcessor(DataProcessor):
         )
 
     def get_train_tsv(self, data_dir):
-        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0, error_bad_lines=False)
+        tsv = pd.read_csv(os.path.join(data_dir, "train.tsv"), sep='\t', index_col=False, header=0, encoding='utf-8', error_bad_lines=False)
         tsv = tsv.dropna()
         tsv['num_label'] = np.where(tsv.label == 'not_entailment', 1, 0)
         tsv['sentence'] = tsv.question + " [SEP] " + tsv.sentence
@@ -361,12 +367,20 @@ class QnliProcessor(DataProcessor):
         )
 
     def get_dev_tsv(self, data_dir):
-        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0, error_bad_lines=False)
+        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0, encoding='utf-8', error_bad_lines=False)
         tsv = tsv.dropna()
         tsv['num_label'] = np.where(tsv.label == 'not_entailment', 1, 0)
-        tsv['sentence'] = tsv.question + " [SEP] " + tsv.sentence
+        tsv['sentence'] = " [CLS] " + tsv.question + " [SEP] " + tsv.sentence + " [SEP] "
         tsv = tsv[["num_label", "sentence"]]
         tsv = tsv.rename(columns={'num_label': 'label'})
+        return tsv
+
+    def get_test_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "test.tsv"), sep='\t', index_col=False, header=0, encoding='utf-8', error_bad_lines=False)
+        tsv = tsv.dropna()
+        tsv['sentence'] = " [CLS] " + tsv.question + " [SEP] " + tsv.sentence + " [SEP] "
+        tsv = tsv[["index", "sentence"]]
+        tsv = tsv.rename(columns={'index': 'id'})
         return tsv
 
     def get_labels(self):
@@ -421,6 +435,14 @@ class RteProcessor(DataProcessor):
         tsv['sentence'] = tsv.sentence1 + " [SEP] " + tsv.sentence2
         tsv = tsv[["num_label", "sentence"]]
         tsv = tsv.rename(columns={'num_label': 'label'})
+        return tsv
+
+    def get_test_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "test.tsv"), sep='\t', index_col=False, header=0, error_bad_lines=False)
+        tsv = tsv.dropna()
+        tsv['sentence'] = " [CLS] " + tsv.sentence1 + " [SEP] " + tsv.sentence2 + " [SEP] "
+        tsv = tsv[["index", "sentence"]]
+        tsv = tsv.rename(columns={'index': 'id'})
         return tsv
 
     def get_labels(self):

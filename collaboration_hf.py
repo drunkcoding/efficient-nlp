@@ -2,6 +2,8 @@ import torch
 import deepspeed
 import logging
 import argparse
+import subprocess
+import os
 import numpy as np
 
 from tqdm import tqdm, trange
@@ -172,14 +174,70 @@ class Dataset(torch.utils.data.Dataset):
 dev_texts = processor.get_dev_tsv(args.data_dir)
 encoded_dev_texts = tokenizer(dev_texts["sentence"].to_list(), padding = True, truncation = True, max_length=args.max_seq_length, return_tensors = 'pt')
 eval_dataset = Dataset(encoded_dev_texts, torch.tensor(dev_texts['label']))
-num_labels = len(dev_texts['label'])
-
 eval_sampler = SequentialSampler(eval_dataset)
 eval_dataloader = DataLoader(
     eval_dataset, sampler=eval_sampler, batch_size=1
 )
 
+num_labels = len(dev_texts['label'])
+
+test_texts = processor.get_test_tsv(args.data_dir)
+encoded_test_texts = tokenizer(test_texts["sentence"].to_list(), padding = True, truncation = True, max_length=args.max_seq_length, return_tensors = 'pt')
+test_dataset = Dataset(encoded_test_texts)
+test_sampler = SequentialSampler(test_dataset)
+test_dataloader = DataLoader(
+    test_dataset, sampler=test_sampler, batch_size=1
+)
+
 m = torch.nn.Softmax(dim=1)
+
+import pandas as pd
+
+test_labels = dict()
+for key in model_keys: test_labels[key] = list()
+
+for batch in tqdm(test_dataloader, desc="Testing"):
+    input_ids = batch['input_ids'].to(device)
+    attention_mask = batch['attention_mask'].to(device)
+
+    for key in model_keys:
+        with torch.no_grad():
+            output = models[key](input_ids=input_ids, attention_mask=attention_mask, labels=None)
+            logits = output.logits
+        model_ans = np.argmax(m(output.logits).cpu(),axis=1)[0]
+        if args.task_name == "RTE" or args.task_name == "QNLI":
+            model_ans = "entailment" if model_ans == 0 else "not_entailment"
+        test_labels[key].append(model_ans)
+
+data_dir = f"/data/GlueData/{args.task_name}"
+data_file = "test.tsv"
+if args.task_name == 'MNLI-m':
+    data_dir = data_dir.split('-')[0]
+    data_file = "test_matched.tsv"
+elif args.task_name == 'MNLI-mm':
+    data_dir = data_dir.split('-')[0]
+    data_file = "test_mismatched.tsv"
+result = subprocess.run(['wc', '-l', os.path.join(data_dir, data_file)], stdout=subprocess.PIPE)
+result = result.stdout
+num_lines = int(result.split()[0])
+ids = [x for x in range(num_lines)]
+labels = ["entailment"]*num_lines if args.task_name in ['RTE', 'QNLI', 'MNLI-m', 'MNLI-mm'] else ["1"]*num_lines
+test_result = pd.DataFrame({"id": ids, "label_tmp": labels})
+
+for key in model_keys:
+    # test_result = test_texts.copy()
+    # test_result['label'] = test_labels[key]
+    test_texts['label'] = test_labels[key]
+    # print(test_texts.info(), test_texts)
+    test_result = test_result.join(test_texts, on='id', how='left', rsuffix='_other')
+    # print(test_result.info(), test_result)
+    test_result = test_result.fillna("entailment" if args.task_name in ['RTE', 'QNLI', 'MNLI-m', 'MNLI-mm'] else "1")
+    test_result = test_result[['id', 'label']]
+    # print(test_result.info(), test_result)
+    test_result.to_csv(f"TestResult/{args.task_name}-{key}.tsv", sep='\t',index=False)
+
+# exit()
+
 correct_cnt = dict(zip(model_keys, [0]*len(model_keys)))
 coop_cnt = dict(zip(model_keys, [0]*len(model_keys)))
 
