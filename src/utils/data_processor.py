@@ -181,9 +181,9 @@ class ColaProcessor(DataProcessor):
         return tsv
 
     def get_test_tsv(self, data_dir):
-        tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)
+        tsv = pd.read_csv(os.path.join(data_dir, "test.tsv"), sep='\t', index_col=False, header=0)
         tsv = tsv.dropna()
-        tsv = tsv.rename()
+        tsv = tsv.rename(columns={"index": "id"})
         return tsv
 
     def get_labels(self):
@@ -229,6 +229,12 @@ class Sst2Processor(DataProcessor):
         tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, header=0)[["label", "sentence"]]
         tsv = tsv.dropna()
         # tsv['label'] = tsv['label'].astype(float)
+        return tsv
+
+    def get_test_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "test.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv = tsv.rename(columns={"index": "id"})
         return tsv
 
     def get_labels(self):
@@ -316,6 +322,14 @@ class QqpProcessor(DataProcessor):
         tsv['sentence'] = tsv.question1 + " [SEP] " + tsv.question2
         tsv = tsv.rename(columns={"is_duplicate": "label"})
         tsv = tsv[["label", "sentence"]]
+        return tsv
+
+    def get_test_tsv(self, data_dir):
+        tsv = pd.read_csv(os.path.join(data_dir, "test.tsv"), sep='\t', index_col=False, header=0)
+        tsv = tsv.dropna()
+        tsv['sentence'] = tsv.question1 + " [SEP] " + tsv.question2
+        # tsv = tsv.rename(columns={"is_duplicate": "label"})
+        tsv = tsv[["id", "sentence"]]
         return tsv
 
     def get_labels(self):

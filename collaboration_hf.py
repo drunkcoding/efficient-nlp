@@ -25,7 +25,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 base_dir = "/home/oai/share"
 
 def initialize():

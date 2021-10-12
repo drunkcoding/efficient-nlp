@@ -4,10 +4,13 @@ import os
 import torch
 import random
 import numpy as np
+import deepspeed
 
 import os
-os.environ["NCCL_DEBUG"] = "INFO"
-os.environ["NCCL_SOCKET_IFNAME"] = "eno1"
+os.environ["NCCL_DEBUG"] = "DEBUG"
+# os.environ["NCCL_SOCKET_IFNAME"] = "eno1"
+
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
@@ -15,13 +18,14 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Tenso
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn import CrossEntropyLoss, MSELoss
 from tqdm import tqdm, trange
-from transformers import BertTokenizer, BertConfig, BertModel, BertForSequenceClassification
+from transformers import AutoTokenizer, BertTokenizer, BertConfig, BertModel, BertForSequenceClassification, AutoModelForSequenceClassification
 from transformers import Trainer, TrainingArguments
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
-from data_processor import processors, bert_base_model_config, output_modes
+from src.utils.data_structure import Dataset, HuggingFaceDataset
+from src.utils.data_processor import processors, output_modes
 from utils import convert_examples_to_features, checkpoint_model
 from eval import compute_metrics
 
@@ -44,6 +48,13 @@ def initialize():
         type=str,
         required=True,
         help="The input data dir. Should contain the .tsv files (or other data files) for the task.",
+    )
+    parser.add_argument(
+        "--model_name",
+        default=None,
+        type=str,
+        required=True,
+        help="The name of the model to train.",
     )
     parser.add_argument(
         "--task_name",
@@ -70,24 +81,18 @@ def initialize():
         "than this will be padded.",
     )
     parser.add_argument(
+        "--local_rank",
+        type=int,
+        default=-1,
+        help="local_rank for distributed training on gpus",
+    )
+    parser.add_argument(
         "--do_lower_case",
         action="store_true",
         help="Set this flag if you are using an uncased model.",
     )
     parser.add_argument(
-        "--train_batch_size",
-        default=32,
-        type=int,
-        help="Total batch size for training.",
-    )
-    parser.add_argument(
         "--eval_batch_size", default=8, type=int, help="Total batch size for eval."
-    )
-    parser.add_argument(
-        "--learning_rate",
-        default=5e-5,
-        type=float,
-        help="The initial learning rate for Adam.",
     )
     parser.add_argument(
         "--num_train_epochs",
@@ -105,26 +110,7 @@ def initialize():
     parser.add_argument(
         "--seed", type=int, default=42, help="random seed for initialization"
     )
-    parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=1,
-        help="Number of updates steps to accumulate before performing a backward/update pass.",
-    )
-    parser.add_argument(
-        "--fp16",
-        action="store_true",
-        help="Whether to use 16-bit float precision instead of 32-bit",
-    )
-    parser.add_argument(
-        "--loss_scale",
-        type=float,
-        default=0,
-        help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
-        "0 (default value): dynamic loss scaling.\n"
-        "Positive power of 2: static loss scaling value.\n",
-    )
-
+    parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
     return args
@@ -132,8 +118,11 @@ def initialize():
 
 args = initialize()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# from accelerate import Accelerator
+# accelerator = Accelerator()
+# device = accelerator.device
 
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 task_name = args.task_name.lower()
 
@@ -146,53 +135,57 @@ output_mode = output_modes[task_name]
 label_list = processor.get_labels()
 num_labels = len(label_list)
 
+model_name = f"/home/oai/share/HuggingFace/{args.model_name}/"
 
-model_name = "/home/oai/share/HuggingFace/bert-large-uncased/"
-
-tokenizer = BertTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
-
-
-def model_init():
-    return BertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
-
+tokenizer = AutoTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
 
 # train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=max_length)
 
 training_args = TrainingArguments(
     num_train_epochs=args.num_train_epochs,
-    per_device_train_batch_size=args.train_batch_size,  # batch size per device during training
+    per_device_train_batch_size=32,  # batch size per device during training
     weight_decay=0.01,               # strength of weight decay
     load_best_model_at_end=True,
-    logging_steps=250,
-    evaluation_strategy="steps",
+    logging_strategy='epoch',
+    save_strategy='epoch',
+    save_total_limit=1,
+    evaluation_strategy="epoch",
     output_dir=args.output_dir,
-    learning_rate=args.learning_rate,
+    learning_rate=3e-5,
+    dataloader_drop_last=True,
+    fp16=True,
+    fp16_opt_level="O3",
+    fp16_full_eval=True,
 )
 
 # -------------  Dataset Prepare --------------
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, encodings, labels=None):
-        self.encodings = encodings
-        self.labels = labels
-
-    def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        if self.labels != None:
-            item["labels"] = torch.tensor(self.labels[idx])
-        return item
-
-    def __len__(self):
-        return len(self.encodings["input_ids"])
-
 
 train_texts = processor.get_train_tsv(args.data_dir)
-encoded_train_texts = tokenizer(train_texts["sentence"].to_list(), padding = True, truncation = True, max_length=args.max_seq_length, return_tensors = 'pt')
+encoded_train_texts = tokenizer(
+    train_texts["sentence"].to_list(), 
+    padding = 'max_length', 
+    truncation = True, 
+    max_length=args.max_seq_length, 
+    return_tensors = 'pt'
+)
+
+for key in encoded_train_texts:
+    logger.debug("--------------------%s--- %s", key, encoded_train_texts[key].shape)
+
+# for t in encoded_train_texts['input_ids']:
+#     logger.debug("===== %s %s", t, t.shape)
 
 dev_texts = processor.get_dev_tsv(args.data_dir)
-encoded_dev_texts = tokenizer(dev_texts["sentence"].to_list(), padding = True, truncation = True, max_length=args.max_seq_length, return_tensors = 'pt')
+encoded_dev_texts = tokenizer(
+    dev_texts["sentence"].to_list(), 
+    padding = 'max_length', 
+    truncation = True, 
+    max_length=args.max_seq_length, 
+    return_tensors = 'pt'
+)
 
-print(train_texts.info())
-print(train_texts.head())
+# print(train_texts.info())
+# print(train_texts.head())
 
 train_dataset = Dataset(encoded_train_texts, torch.tensor(train_texts['label']))
 eval_dataset = Dataset(encoded_dev_texts, torch.tensor(dev_texts['label']))
@@ -200,11 +193,37 @@ eval_dataset = Dataset(encoded_dev_texts, torch.tensor(dev_texts['label']))
 def metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
+    print(len(predictions), np.count_nonzero(predictions), np.count_nonzero(labels))
     return compute_metrics(args.task_name.lower(), predictions, labels)
 
 # -------------  Model Training --------------
-trainer = Trainer(model_init=model_init,compute_metrics=metrics,args=training_args,train_dataset=train_dataset, eval_dataset=eval_dataset)
-trainer.hyperparameter_search(direction="maximize")
+
+def model_init():
+    model = BertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
+    # model.half()
+    return model
+
+model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
+
+def BERT_hp_space(trial):
+    return {
+        "learning_rate": trial.suggest_categorical("learning_rate", [5e-5, 3e-5, 2e-5]),
+        "weight_decay": trial.suggest_float("weight_decay", 0.1, 0.3, log=True),
+        "num_train_epochs": trial.suggest_int("num_train_epochs", 2, 4, log=True),
+        "seed": trial.suggest_int("seed", 20, 40, log=True),
+        "per_device_train_batch_size": trial.suggest_categorical("per_device_train_batch_size", [16, 32]),
+    }
+
+trainer = Trainer(
+    model = model,
+    # model_init=model_init,
+    compute_metrics=metrics,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    # optimizers=(optimizer, torch.optim.lr_scheduler.LambdaLR)
+)
+# trainer.hyperparameter_search(direction="maximize", n_trials=20, hp_space=BERT_hp_space)
 trainer.train()
 
 # # eval_dataset = TensorDataset(encoded_texts)

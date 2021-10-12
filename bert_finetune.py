@@ -298,7 +298,7 @@ def init_bert_weights(module):
     if isinstance(module, (torch.nn.Linear, torch.nn.Embedding)):
         # Slightly different from the TF version which uses truncated_normal for initialization
         # cf https://github.com/pytorch/pytorch/pull/5617
-        print('random init')
+        # print('random init')
         module.weight.data.normal_(mean=0.0, std=0.02/ np.sqrt(2.0 * 12))
     if isinstance(module, torch.nn.Linear) and module.bias is not None:
         module.bias.data.zero_()
@@ -313,12 +313,13 @@ if args.random:
     logger.info("USING RANDOM INITIALISATION FOR FINETUNING")
     model.apply(init_bert_weights)
 
-# if args.fp16:
-#     model.half()
-model.to(device)
+if args.fp16:
+    model.half()
+# model.to(device)
 
 # Prepare optimizer
 param_optimizer = list(model.named_parameters())
+# print(param_optimizer)
 no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
 optimizer_grouped_parameters = [
     {
@@ -335,9 +336,13 @@ optimizer_grouped_parameters = [
     },
 ]
 
+# for name, param in list(model.named_parameters()):
+#     print(name, type(param))
+
 model, optimizer, _, _ = deepspeed.initialize(
     args=args,
     model=model,
+    # model_parameters=list(model.named_parameters()),
     model_parameters=optimizer_grouped_parameters,
     dist_init_required=True,
 )

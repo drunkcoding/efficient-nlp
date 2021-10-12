@@ -10,36 +10,25 @@ NGPU=1
 echo "Started scripts"
 
 TASK=$1
-EFFECTIVE_BATCH_SIZE=$2
-LR=$3
-NUM_EPOCH=$4
+NUM_EPOCH=$2
 base_dir=`pwd`
-JOBNAME=$5
+JOBNAME=$3
 model_name="bert-large-uncased"
 OUTPUT_DIR="${SCRIPT_DIR}/outputs/${model_name}/${JOBNAME}_bsz${EFFECTIVE_BATCH_SIZE}_lr${LR}_epoch${NUM_EPOCH}"
 
 GLUE_DIR="/data/GlueData"
 
-MAX_GPU_BATCH_SIZE=32
-PER_GPU_BATCH_SIZE=$((EFFECTIVE_BATCH_SIZE/NGPU))
-if [[ $PER_GPU_BATCH_SIZE -lt $MAX_GPU_BATCH_SIZE ]]; then
-       GRAD_ACCUM_STEPS=1
-else 
-       GRAD_ACCUM_STEPS=$((PER_GPU_BATCH_SIZE/MAX_GPU_BATCH_SIZE))
-fi
-
 # python -m torch.distributed.launch --nproc_per_node=${NGPU} \ --master_port=12346 \
 
 echo "Fine Tuning $CHECKPOINT_PATH"
-run_cmd="python bert-large-finetune.py \
+run_cmd="deepspeed --num_gpus=2 bert-large-finetune.py \
+       --deepspeed
+       --deepspeed_config bert-large-uncased.json \
        --task_name $TASK \
-       --fp16 \
        --do_lower_case \
+       --model_name ${model_name}\
        --data_dir $GLUE_DIR/$TASK/ \
-       --max_seq_length 512 \
-       --train_batch_size ${PER_GPU_BATCH_SIZE} \
-       --gradient_accumulation_steps ${GRAD_ACCUM_STEPS} \
-       --learning_rate ${LR} \
+       --max_seq_length 128 \
        --num_train_epochs ${NUM_EPOCH} \
        --output_dir ${OUTPUT_DIR}_${TASK} \
        &> ${LOG_DIR}/${model_name}/${JOBNAME}_${TASK}_bzs${EFFECTIVE_BATCH_SIZE}_lr${LR}_epoch${NUM_EPOCH}_${NGPU}_deepspeed-kernel.log

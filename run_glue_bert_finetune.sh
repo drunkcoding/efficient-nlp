@@ -32,10 +32,7 @@ fi
 # python -m torch.distributed.launch --nproc_per_node=${NGPU} \ --master_port=12346 \
 
 echo "Fine Tuning $CHECKPOINT_PATH"
-run_cmd="python -m torch.distributed.launch \
-       --nproc_per_node=1 \
-       --master_addr=192.168.5.11 \
-       --master_port=49000 \
+run_cmd="deepspeed --include='localhost:0,1' \
        bert_finetune.py \
        --task_name $TASK \
        --do_train \
