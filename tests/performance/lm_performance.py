@@ -13,9 +13,9 @@ os.environ['TOKENIZERS_PARALLELISM'] = "false"
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
 
-from src.utils.logger import Logger
-from src.utils.data_processor import processors, output_modes
-from src.utils.data_structure import HuggingFaceDataset
+from ecosys.utils.logger import Logger
+from ecosys.utils.data_processor import processors, output_modes
+from ecosys.utils.data_structure import HuggingFaceDataset
 
 logger = Logger(__file__, "info", "w")
 

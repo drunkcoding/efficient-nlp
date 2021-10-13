@@ -7,9 +7,11 @@ import deepspeed
 
 import os
 os.environ["NCCL_DEBUG"] = "DEBUG"
+os.environ['TOKENIZERS_PARALLELISM'] = "false"
+os.environ['NUMEXPR_MAX_THREADS'] = '48'
 # os.environ["NCCL_SOCKET_IFNAME"] = "eno1"
 
-# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, BertForSequenceClassification
 from transformers import Trainer, TrainingArguments
@@ -21,7 +23,7 @@ from ecosys.utils.eval import compute_metrics
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
     datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO,
+    level=logging.DEBUG,
 )
 logger = logging.getLogger(__name__)
 
@@ -128,6 +130,12 @@ model_name = f"/home/oai/share/HuggingFace/{args.model_name}/"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
 
+special_tokens_dict = {'bos_token': '[CLS]', 'eos_token': '[SEP]', 'pad_token': '|endoftext|'}
+tokenizer.add_special_tokens(special_tokens_dict)
+
+# tokenizer.pad_token = tokenizer.eos_token
+# config.pad_token_id = config.eos_token_id
+
 # train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=max_length)
 
 training_args = TrainingArguments(
@@ -151,25 +159,29 @@ training_args = TrainingArguments(
 
 train_texts = processor.get_train_tsv(args.data_dir)
 encoded_train_texts = tokenizer(
-    train_texts["sentence"].to_list(), 
+    train_texts["sentence"].to_list(),
+    # train_texts["sentence"].str.replace('[SEP]', '', regex=False).to_list(),
     padding = 'max_length', 
     truncation = True, 
     max_length=args.max_seq_length, 
+    add_special_tokens=True,
     return_tensors = 'pt'
 )
 
 for key in encoded_train_texts:
-    logger.debug("--------------------%s--- %s", key, encoded_train_texts[key].shape)
+    logger.debug("---%s--- %s", key, encoded_train_texts[key].shape)
 
 # for t in encoded_train_texts['input_ids']:
 #     logger.debug("===== %s %s", t, t.shape)
 
 dev_texts = processor.get_dev_tsv(args.data_dir)
 encoded_dev_texts = tokenizer(
-    dev_texts["sentence"].to_list(), 
+    dev_texts["sentence"].to_list(),
+    # dev_texts["sentence"].str.replace('[SEP]', '', regex=False).to_list(),
     padding = 'max_length', 
     truncation = True, 
-    max_length=args.max_seq_length, 
+    max_length=args.max_seq_length,
+    add_special_tokens=True,
     return_tensors = 'pt'
 )
 
@@ -193,6 +205,8 @@ def model_init():
     return model
 
 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
+model.resize_token_embeddings(len(tokenizer))
+model.config.pad_token_id = model.config.eos_token_id 
 
 def BERT_hp_space(trial):
     return {

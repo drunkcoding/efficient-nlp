@@ -11,9 +11,9 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "../"))
 
-from src.models.temperature_scaling import ModelWithTemperature
-from src.utils.data_processor import processors, output_modes
-from src.utils.data_structure import HuggingFaceDataset
+from ecosys.models.temperature_scaling import ModelWithTemperature
+from ecosys.utils.data_processor import processors, output_modes
+from ecosys.utils.data_structure import HuggingFaceDataset
 
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification

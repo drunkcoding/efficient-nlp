@@ -13,7 +13,7 @@ TASK=$1
 NUM_EPOCH=$2
 base_dir=`pwd`
 JOBNAME=$3
-model_name="bert-large-uncased"
+model_name=$4
 OUTPUT_DIR="${SCRIPT_DIR}/outputs/${model_name}/${JOBNAME}_bsz${EFFECTIVE_BATCH_SIZE}_lr${LR}_epoch${NUM_EPOCH}"
 
 GLUE_DIR="/data/GlueData"
@@ -21,9 +21,9 @@ GLUE_DIR="/data/GlueData"
 # python -m torch.distributed.launch --nproc_per_node=${NGPU} \ --master_port=12346 \
 
 echo "Fine Tuning $CHECKPOINT_PATH"
-run_cmd="deepspeed --num_gpus=2 bert-large-finetune.py \
+run_cmd="deepspeed --num_gpus=2 gpt2-finetune.py \
        --deepspeed
-       --deepspeed_config bert-large-uncased.json \
+       --deepspeed_config deepspeed_cfg.json \
        --task_name $TASK \
        --do_lower_case \
        --model_name ${model_name}\

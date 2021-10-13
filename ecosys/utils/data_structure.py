@@ -2,16 +2,32 @@ import torch
 import csv
 
 device = torch.device(
-    "cuda:0" if torch.cuda.is_available() else "cpu"
+    "cuda:1" if torch.cuda.is_available() else "cpu"
 )
+
+class ViTDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset, feature_extractor):
+        self.dataset = dataset
+        self.feature_extractor = feature_extractor
+
+    def __getitem__(self, idx):
+        # print(self.dataset[idx][0])
+        encodings = self.feature_extractor(self.dataset[idx][0], return_tensors='pt')   
+        # print("bbbbb", encodings['pixel_values'].shape)
+        # print("aaaa", encodings['pixel_values'].squeeze(0).shape)
+        encodings['pixel_values'] = encodings['pixel_values'].squeeze(0).to(device)
+        return (encodings, torch.tensor(self.dataset[idx][1], dtype=torch.long).to(device))
+
+    def __len__(self):
+        return len(self.dataset)
 
 class TorchVisionDataset(torch.utils.data.Dataset):
     def __init__(self, input):
         self.input = input
 
     def __getitem__(self, idx):
-        item = {'x': self.input[i][0].clone().detach()}
-        return (item, self.input[i][1].clone().detach() if self.input[i][1] != None else None)
+        item = {'x': self.input[idx][0].clone().detach().to(device)}
+        return (item, self.input[idx][1] if self.input[idx][1] != None else None)
 
     def __len__(self):
         return len(self.input)

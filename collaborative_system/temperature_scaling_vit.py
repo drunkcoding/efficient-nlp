@@ -5,8 +5,9 @@ from outliers import smirnov_grubbs as grubbs
 import seaborn as sns
 import matplotlib
 import matplotlib.pyplot as plt
-from sklearn.mixture import GaussianMixture
-from scipy.optimize import minimize
+from torch.utils.data.sampler import SubsetRandomSampler
+from torchvision import datasets, transforms
+import torchvision.models as models
 
 import os
 import sys
@@ -16,13 +17,14 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../"))
 
 from ecosys.models.temperature_scaling import ModelWithTemperature
 from ecosys.utils.data_processor import processors, output_modes
-from ecosys.utils.data_structure import Dataset, HuggingFaceDataset
+from ecosys.utils.data_structure import Dataset, HuggingFaceDataset, ViTDataset
 from ecosys.algo.monte_carlo import monte_carlo_bounds
 from ecosys.decorators.model_decorators import model_eval
 from ecosys.utils.eval import compute_metrics
 
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import ViTFeatureExtractor, ViTForImageClassification
+
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset, dataloader
 from sklearn.model_selection import train_test_split
 
@@ -47,29 +49,23 @@ logger.addHandler(fh)
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 base_dir = "/home/oai/share"
-tokenizer = AutoTokenizer.from_pretrained(f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}")
-
+tokenizer = ViTFeatureExtractor.from_pretrained(f"{base_dir}/HuggingFace/vit-base-patch32-384")
 
 model_keys = [
     "S", 
     "M", 
-    "L",
+    # "L",
 ]
 
 energy_discount_factor = [
     0.25, 
     0.5, 
-    1.0,
+    # 1.0,
 ]
 
 model_paths = [
-    f"{base_dir}/HuggingFace/distilbert-base-uncased-{task_name}",
-    # f"/home/oai/efficient-nlp/outputs/distilbert-base-uncased/QQPFineTune_bsz_lr_epoch2_QQP/checkpoint-9500",
-    # f"/home/oai/efficient-nlp/outputs/distilbert-base-uncased/FineTune_bsz_lr_epoch2_SST-2/checkpoint-1000",
-    f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}",
-    # f"/home/oai/efficient-nlp/outputs/bert-base-uncased/QNLIFineTune_bsz_lr_epoch2_QNLI/checkpoint-3000",
-    # f"/home/oai/efficient-nlp/outputs/bert-base-uncased/QQPFineTune_bsz_lr_epoch2_QQP/checkpoint-11000",
-    "/home/oai/efficient-nlp/outputs/bert-large-uncased/FineTune_bsz_lr_epoch4_CoLA/checkpoint-132",
+    f"{base_dir}/HuggingFace/vit-base-patch32-384",
+    f"{base_dir}/HuggingFace/vit-large-patch32-384",
 ]
 
 model_energy = dict(zip(model_keys, energy_discount_factor))
@@ -79,46 +75,25 @@ model_paths = dict(zip(model_keys, model_paths))
 models = dict()
 for key in model_keys:
     logger.debug("key %s, path %s", key, model_paths[key])
-    models[key] = AutoModelForSequenceClassification.from_pretrained(model_paths[key]).to(device) # if key != "S" else DistilBertForSequenceClassification.from_pretrained(model_paths[key])
+    models[key] = ViTForImageClassification.from_pretrained(model_paths[key]).to(device) # if key != "S" else DistilBertForSequenceClassification.from_pretrained(model_paths[key])
     models[key].eval()
+    models[key].to(device)
 
 # -------------  Dataset Prepare --------------
 
-processor = processors[task_name.lower()]()
-output_mode = output_modes[task_name.lower()]
-
 def data_preprocessing():
-    texts = processor.get_dev_tsv(f'/data/GlueData/{task_name}/').reset_index()
 
-    train, test = train_test_split(texts, test_size=0.5)
+    val_dataset = ViTDataset(datasets.ImageNet("/home/oai/share/dataset/.", split="val"), tokenizer)
 
-    encoded_texts = tokenizer(
-        train["sentence"].to_list(), 
-        padding = 'max_length', 
-        truncation = True, 
-        max_length=sequence_length, 
-        return_tensors = 'pt'
-    )
-    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(train['label'].to_list()))
-    sampler = SequentialSampler(dataset)
-    train_dataloader = DataLoader(
-        dataset, sampler=sampler, batch_size=batch_size
-    )
+    index = np.array([x for x in range(len(val_dataset))])
+    train_index, test_index = train_test_split(index, test_size=0.6)
 
-    encoded_texts = tokenizer(
-        test["sentence"].to_list(), 
-        padding = 'max_length', 
-        truncation = True, 
-        max_length=sequence_length, 
-        return_tensors = 'pt'
-    )
-    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(test['label'].to_list()))
-    sampler = SequentialSampler(dataset)
-    test_dataloader = DataLoader(
-        dataset, sampler=sampler, batch_size=batch_size
-    )
+    train_sampler = SubsetRandomSampler(train_index)
+    train_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=train_sampler)
+    test_sampler = SubsetRandomSampler(test_index)
+    test_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=test_sampler)
 
-    return train_dataloader, test_dataloader
+    return train_loader, test_loader
 
 m = torch.nn.Softmax(dim=1)
 
@@ -162,7 +137,7 @@ def total_reward(threshold):
 
 threshold_bounds = monte_carlo_bounds(
         total_reward, 
-        [(0.5, 1.0),(0.5, 1.0)], 
+        [(0.5, 1.0)]*(len(model_keys)-1), 
         [('reward', float), ('energy', float)],
         n=1000,
         tops=20,
@@ -408,40 +383,4 @@ for key in model_keys:
 logger.info("***** Collaborative Eval results *****")
 for key in model_keys:
     logger.info("%s process count %s, correct count %s, percent %d, prob %s", key, process_cnt[key], coop_cnt[key], int(coop_cnt[key]/process_cnt[key] * 100) if process_cnt[key] != 0 else 0, process_prob[key])
-
-# # -------------  Evaluation WITHOUT Temperature --------------
-
-# model_labels = []
-# true_labels = []
-
-# for data_batch in tqdm(dev_dataloader, desc="Evaluating"):
-#     input_ids = data_batch['input_ids'].to(device)
-#     # token_type_ids = data_batch['token_type_ids'].to(device)
-#     attention_mask = data_batch['attention_mask'].to(device)
-#     labels = data_batch['labels'].to(device)
-
-#     true_labels += data_batch['labels'].numpy().flatten().tolist()
-
-#     with torch.no_grad():
-#         features = {}
-#         preds = model(input_ids=input_ids, attention_mask=attention_mask)
-#         logits = preds.logits
-#         # logger.debug("softmax output %s", m(logits).cpu())
-#         model_ans = np.argmax(m(logits).cpu(),axis=1)
-#         model_labels += model_ans.flatten().tolist()
-        
-# true_labels = np.array(true_labels)
-# model_labels = np.array(model_labels)
-
-# logger.info("**** Label Stats (Train) ****")
-# logger.info("num_labels %s, pred ones %s", len(true_labels), np.count_nonzero(model_labels)) 
-
-# logger.info("**** Model Accuracy Before Temerature ****")
-# logger.info("corrcoef %s, num_labels %s, num_correct %s (%s)", 
-#     np.corrcoef(true_labels, model_labels)[0,1],
-#     len(true_labels),
-#     np.count_nonzero(model_labels == true_labels),
-#     np.count_nonzero(model_labels == true_labels) / len(true_labels)
-# )
-
 
