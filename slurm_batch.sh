@@ -102,7 +102,7 @@ echo "Moving input data to the compute node's scratch space: $SCRATCH_DISK"
 
 # experiment_text_file=$1
 # COMMAND="`sed \"${SLURM_ARRAY_TASK_ID}q;d\" ${experiment_text_file}`"
-COMMAND="`bash run_glue_bert_finetune.sh CoLA 32 0.00003 1 CoLAFineTune bert-large-uncased bert-large-uncased`"
+COMMAND="`bash run_glue_finetune.sh CoLA 10 FineTune gpt2`"
 echo "Running provided command: ${COMMAND}"
 eval "${COMMAND}"
 echo "Command ran successfully!"
