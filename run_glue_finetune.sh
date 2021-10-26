@@ -21,7 +21,7 @@ GLUE_DIR="/data/GlueData"
 # python -m torch.distributed.launch --nproc_per_node=${NGPU} \ --master_port=12346 \
 
 echo "Fine Tuning $CHECKPOINT_PATH"
-run_cmd="deepspeed --num_gpus=2 gpt2-finetune.py \
+run_cmd="deepspeed --num_gpus=2 bert-large-finetune.py \
        --deepspeed
        --deepspeed_config deepspeed_cfg.json \
        --task_name $TASK \

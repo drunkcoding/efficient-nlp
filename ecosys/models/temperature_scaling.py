@@ -60,9 +60,9 @@ class ModelWithTemperature(nn.Module):
         #     print(logits.shape, np.count_nonzero(logits.cpu()), logits)
         #     break
 
-        self.cuda(1)
-        nll_criterion = nn.CrossEntropyLoss().cuda(1)
-        ece_criterion = ECELoss().cuda(1)
+        self.cuda()
+        nll_criterion = nn.CrossEntropyLoss().cuda()
+        ece_criterion = ECELoss().cuda()
 
         # First: collect all the logits and labels for the validation set
         logits_list = []
@@ -95,8 +95,8 @@ class ModelWithTemperature(nn.Module):
 
                 # num_batch += 1
                 # if num_batch > 10: break
-            logits = torch.cat(logits_list).cuda(1)
-            labels = torch.cat(labels_list).cuda(1)
+            logits = torch.cat(logits_list).cuda()
+            labels = torch.cat(labels_list).cuda()
         labels = torch.flatten(labels)
         # Calculate NLL and ECE before temperature scaling
         print(logits.shape, labels.shape)

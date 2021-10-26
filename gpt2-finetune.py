@@ -1,3 +1,4 @@
+import functools
 import logging
 import argparse
 import os
@@ -6,6 +7,10 @@ import numpy as np
 import deepspeed
 
 import os
+
+from ecosys.algo.monte_carlo import monte_carlo_bounds
+
+# from transformers.models.auto.configuration_auto import AutoConfig
 os.environ["NCCL_DEBUG"] = "DEBUG"
 os.environ['TOKENIZERS_PARALLELISM'] = "false"
 os.environ['NUMEXPR_MAX_THREADS'] = '48'
@@ -13,7 +18,7 @@ os.environ['NUMEXPR_MAX_THREADS'] = '48'
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, BertForSequenceClassification
+from transformers import AutoTokenizer, GPT2Tokenizer, GPT2ForSequenceClassification, AutoConfig
 from transformers import Trainer, TrainingArguments
 
 from ecosys.utils.data_structure import Dataset
@@ -123,15 +128,40 @@ if task_name not in processors:
 processor = processors[task_name]()
 output_mode = output_modes[task_name]
 
-label_list = processor.get_labels()
-num_labels = len(label_list)
+# label_list = processor.get_labels()
+# num_labels = len(label_list)
+num_labels=1
 
 model_name = f"/home/oai/share/HuggingFace/{args.model_name}/"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
+# tokenizer = AutoTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
 
-special_tokens_dict = {'bos_token': '[CLS]', 'eos_token': '[SEP]', 'pad_token': '|endoftext|'}
-tokenizer.add_special_tokens(special_tokens_dict)
+def build_inputs_with_special_tokens(self, token_ids_0, token_ids_1=None):
+    outputs = [self.bos_token_id] + token_ids_0 + [self.eos_token_id]
+    if token_ids_1 != None:
+        outputs += token_ids_1 + [self.eos_token_id]
+    return outputs
+
+GPT2Tokenizer.build_inputs_with_special_tokens = build_inputs_with_special_tokens
+tokenizer = GPT2Tokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
+# set pad_token_id to unk_token_id -> be careful here as unk_token_id == eos_token_id == bos_token_id
+tokenizer.pad_token = tokenizer.unk_token
+
+# SPECIAL_TOKENS  = { "bos_token": "[CLS]",
+#                     "eos_token": "[EOS]",
+#                     "unk_token": "[UNK]",                    
+#                     "pad_token": "[PAD]",
+#                     "sep_token": "[SEP]"}
+# tokenizer.add_special_tokens(SPECIAL_TOKENS)
+config = AutoConfig.from_pretrained(model_name, num_labels=1)
+# config = AutoConfig.from_pretrained(model_name, 
+#                                     bos_token_id=tokenizer.bos_token_id,
+#                                     eos_token_id=tokenizer.eos_token_id,
+#                                     sep_token_id=tokenizer.sep_token_id,
+#                                     pad_token_id=tokenizer.pad_token_id,
+#                                     # output_hidden_states=False
+#                                     num_labels=num_labels,
+#                                 )
 
 # tokenizer.pad_token = tokenizer.eos_token
 # config.pad_token_id = config.eos_token_id
@@ -145,14 +175,15 @@ training_args = TrainingArguments(
     load_best_model_at_end=True,
     logging_strategy='epoch',
     save_strategy='epoch',
-    save_total_limit=1,
+    # save_total_limit=1,
     evaluation_strategy="epoch",
     output_dir=args.output_dir,
-    learning_rate=3e-5,
-    dataloader_drop_last=True,
+    learning_rate=6.25e-5,
+    # dataloader_drop_last=True,
     fp16=True,
     fp16_opt_level="O3",
     fp16_full_eval=True,
+    warmup_steps=1e2,
 )
 
 # -------------  Dataset Prepare --------------
@@ -160,11 +191,9 @@ training_args = TrainingArguments(
 train_texts = processor.get_train_tsv(args.data_dir)
 encoded_train_texts = tokenizer(
     train_texts["sentence"].to_list(),
-    # train_texts["sentence"].str.replace('[SEP]', '', regex=False).to_list(),
     padding = 'max_length', 
     truncation = True, 
     max_length=args.max_seq_length, 
-    add_special_tokens=True,
     return_tensors = 'pt'
 )
 
@@ -177,11 +206,9 @@ for key in encoded_train_texts:
 dev_texts = processor.get_dev_tsv(args.data_dir)
 encoded_dev_texts = tokenizer(
     dev_texts["sentence"].to_list(),
-    # dev_texts["sentence"].str.replace('[SEP]', '', regex=False).to_list(),
     padding = 'max_length', 
     truncation = True, 
     max_length=args.max_seq_length,
-    add_special_tokens=True,
     return_tensors = 'pt'
 )
 
@@ -191,31 +218,73 @@ encoded_dev_texts = tokenizer(
 train_dataset = Dataset(encoded_train_texts, torch.tensor(train_texts['label']))
 eval_dataset = Dataset(encoded_dev_texts, torch.tensor(dev_texts['label']))
 
+model = GPT2ForSequenceClassification.from_pretrained(model_name, config=config).cuda()
+model.resize_token_embeddings(len(tokenizer))
+model.config.pad_token_id = -100
+
+print(model.config.num_labels)
+# exit()
+
+
+def compute_acc(predictions, labels, th):
+    predictions = np.where(predictions > th[0], 1, 0)
+    return compute_metrics(args.task_name.lower(), predictions, labels)['mcc']
+
 def metrics(eval_pred):
-    predictions, labels = eval_pred
-    predictions = np.argmax(predictions, axis=1)
-    print(len(predictions), np.count_nonzero(predictions), np.count_nonzero(labels))
+    print(eval_pred)
+    # predictions, labels = eval_pred
+    predictions = eval_pred.predictions.reshape((-1, num_labels))
+    labels = eval_pred.label_ids.flatten()
+
+    # threshold_bounds = monte_carlo_bounds(
+    #     functools.partial(compute_acc, predictions, labels), 
+    #     [(np.min(predictions), np.max(predictions))], 
+    #     [('reward', float)],
+    #     n=1000,
+    #     tops=20,
+    #     maxiter=20,
+    # )
+    # logger.info("------threshold %s -----", np.mean(threshold_bounds))
+    # predictions = np.where(predictions > np.mean(threshold_bounds), 1, 0)
+    predictions = np.where(predictions > 0.5, 1, 0)
+    # predictions = np.argmax(predictions, axis=1)
+    # print(len(predictions), np.count_nonzero(predictions), np.count_nonzero(labels))
     return compute_metrics(args.task_name.lower(), predictions, labels)
 
 # -------------  Model Training --------------
 
-def model_init():
-    model = BertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
-    # model.half()
-    return model
+# def model_init():
+#     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True).cuda()
+#     model.resize_token_embeddings(len(tokenizer))
+#     return model
 
-model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
-model.resize_token_embeddings(len(tokenizer))
-model.config.pad_token_id = model.config.eos_token_id 
 
-def BERT_hp_space(trial):
-    return {
-        "learning_rate": trial.suggest_categorical("learning_rate", [5e-5, 3e-5, 2e-5]),
-        "weight_decay": trial.suggest_float("weight_decay", 0.1, 0.3, log=True),
-        "num_train_epochs": trial.suggest_int("num_train_epochs", 2, 4, log=True),
-        "seed": trial.suggest_int("seed", 20, 40, log=True),
-        "per_device_train_batch_size": trial.suggest_categorical("per_device_train_batch_size", [16, 32]),
-    }
+# model.config.num_labels = num_labels
+# model.transformer.eval()
+
+# for parameter in model.transformer.parameters():
+#     parameter.requires_grad = False
+
+# for i, m in enumerate(model.transformer.h):        
+#     #Only un-freeze the last n transformer blocks
+#     if i+1 > 6:
+#         for parameter in m.parameters():
+#             parameter.requires_grad = True 
+
+# for parameter in model.transformer.ln_f.parameters():        
+#     parameter.requires_grad = True
+
+# for parameter in model.transformer.lm_head.parameters():        
+#     parameter.requires_grad = True
+
+# def BERT_hp_space(trial):
+#     return {
+#         "learning_rate": trial.suggest_categorical("learning_rate", [5e-5, 3e-5, 2e-5]),
+#         "weight_decay": trial.suggest_float("weight_decay", 0.001, 0.3, log=True),
+#         "num_train_epochs": trial.suggest_int("num_train_epochs", 2, 10, log=True),
+#         "seed": trial.suggest_int("seed", 20, 40, log=True),
+#         "per_device_train_batch_size": trial.suggest_categorical("per_device_train_batch_size", [16, 32]),
+#     }
 
 trainer = Trainer(
     model = model,
@@ -226,179 +295,6 @@ trainer = Trainer(
     eval_dataset=eval_dataset,
     # optimizers=(optimizer, torch.optim.lr_scheduler.LambdaLR)
 )
-# trainer.hyperparameter_search(direction="maximize", n_trials=20, hp_space=BERT_hp_space)
+# trainer.hyperparameter_search(direction="maximize", n_trials=20, hp_space=BERT_hp_space, backend="optuna")
 trainer.train()
 
-# # eval_dataset = TensorDataset(encoded_texts)
-# eval_sampler = SequentialSampler(eval_dataset)
-# eval_dataloader = DataLoader(
-#     eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size
-# )
-
-# logger.info("***** Running evaluation *****")
-# logger.info("  Num examples = %d", len(encoded_texts['labels']))
-# logger.info("  Batch size = %d", args.eval_batch_size)
-
-# model.eval()
-# eval_loss = 0
-# nb_eval_steps = 0
-# preds = []
-
-# for input_ids, attention_mask, labels in tqdm(
-#     eval_dataloader, desc="Evaluating"
-# ):
-#     input_ids = input_ids.to(device)
-#     attention_mask = attention_mask.to(device)
-#     labels = labels.to(device)
-
-#     with torch.no_grad():
-#         logits = model(input_ids=input_ids, attention_mask=attention_mask, labels=None).logits
-
-#     # create eval loss and other metric required by the task
-#     if output_mode == "classification":
-#         loss_fct = CrossEntropyLoss()
-#         tmp_eval_loss = loss_fct(
-#             logits.view(-1, num_labels), label_ids.view(-1)
-#         )
-#     elif output_mode == "regression":
-#         loss_fct = MSELoss()
-#         print(logits.type())
-#         print(label_ids.type())
-#         if task_name == "sts-b":
-#             tmp_eval_loss = loss_fct(
-#                 logits.float().view(-1), label_ids.view(-1)
-#             )
-#         else:
-#             tmp_eval_loss = loss_fct(logits.view(-1), label_ids.view(-1))
-#     logger.debug("tmp_eval_loss %s", tmp_eval_loss.mean().item())
-#     eval_loss += tmp_eval_loss.mean().item()
-#     nb_eval_steps += 1
-#     if len(preds) == 0:
-#         preds.append(logits.detach().cpu().numpy())
-#     else:
-#         preds[0] = np.append(
-#             preds[0], logits.detach().cpu().numpy(), axis=0)
-
-# logger.debug("eval_loss %s, nb_eval_steps %s", eval_loss, nb_eval_steps)
-# logger.debug("tr_loss %s, nb_tr_steps %s", tr_loss, nb_tr_steps)
-# eval_loss = eval_loss / nb_eval_steps
-# preds = preds[0]
-# if output_mode == "classification":
-#     preds = np.argmax(preds, axis=1)
-# elif output_mode == "regression":
-#     preds = np.squeeze(preds)
-# result = compute_metrics(task_name, preds, all_label_ids.numpy())
-# loss = tr_loss / nb_tr_steps if args.do_train else None
-
-# result["eval_loss"] = eval_loss
-# result["global_step"] = global_step
-# result["loss"] = loss
-
-# output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
-# with open(output_eval_file, "w") as writer:
-#     logger.info("***** Eval results *****")
-#     for key in sorted(result.keys()):
-#         logger.info("  %s = %s", key, str(result[key]))
-#         writer.write("%s = %s\n" % (key, str(result[key])))
-
-# # hack for MNLI-MM
-# if task_name == "mnli":
-#     task_name = "mnli-mm"
-#     processor = processors[task_name]()
-
-#     if (
-#         os.path.exists(args.output_dir + "-MM")
-#         and os.listdir(args.output_dir + "-MM")
-#         and args.do_train
-#     ):
-#         raise ValueError(
-#             "Output directory ({}{}) already exists and is not empty.".format(
-#                 args.output_dir, "-MM"
-#             )
-#         )
-#     if not os.path.exists(args.output_dir + "-MM"):
-#         os.makedirs(args.output_dir + "-MM")
-
-#     eval_examples = processor.get_dev_examples(args.data_dir)
-#     eval_features = convert_examples_to_features(
-#         eval_examples, label_list, args.max_seq_length, tokenizer, output_mode
-#     )
-#     logger.info("***** Running evaluation *****")
-#     logger.info("  Num examples = %d", len(eval_examples))
-#     logger.info("  Batch size = %d", args.eval_batch_size)
-#     all_input_ids = torch.tensor(
-#         [f.input_ids for f in eval_features], dtype=torch.long
-#     )
-#     all_input_mask = torch.tensor(
-#         [f.input_mask for f in eval_features], dtype=torch.long
-#     )
-#     all_segment_ids = torch.tensor(
-#         [f.segment_ids for f in eval_features], dtype=torch.long
-#     )
-#     all_label_ids = torch.tensor(
-#         [f.label_id for f in eval_features], dtype=torch.long
-#     )
-
-#     eval_data = TensorDataset(
-#         all_input_ids, all_input_mask, all_segment_ids, all_label_ids
-#     )
-#     # Run prediction for full data
-#     eval_sampler = SequentialSampler(eval_data)
-#     eval_dataloader = DataLoader(
-#         eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size
-#     )
-
-#     model.eval()
-#     eval_loss = 0
-#     nb_eval_steps = 0
-#     preds = []
-
-#     for input_ids, input_mask, segment_ids, label_ids in tqdm(
-#         eval_dataloader, desc="Evaluating"
-#     ):
-#         input_ids = input_ids.to(device)
-#         input_mask = input_mask.to(device)
-#         segment_ids = segment_ids.to(device)
-#         label_ids = label_ids.to(device)
-
-#         with torch.no_grad():
-#             logits = model(input_ids, segment_ids, input_mask, labels=None)
-
-#         if args.focal:
-#             loss_fct = FocalLoss(class_num=num_labels, gamma=args.gamma)
-#         else:
-#             loss_fct = CrossEntropyLoss()
-#         tmp_eval_loss = loss_fct(
-#             logits.view(-1, num_labels), label_ids.view(-1)
-#         )
-#         logger.debug("tmp_eval_loss %s", tmp_eval_loss)
-#         logger.debug("logits %s %s %s, label_ids %s", logits,
-#                         logits.view(-1), logits.view(-1, num_labels), label_ids.view(-1))
-#         eval_loss += tmp_eval_loss.mean().item()
-#         nb_eval_steps += 1
-#         if len(preds) == 0:
-#             preds.append(logits.detach().cpu().numpy())
-#         else:
-#             preds[0] = np.append(
-#                 preds[0], logits.detach().cpu().numpy(), axis=0
-#             )
-#     logger.debug("eval_loss %s, nb_eval_steps %s",
-#                     eval_loss, nb_eval_steps)
-#     logger.debug("tr_loss %s, nb_tr_steps %s", tr_loss, nb_tr_steps)
-#     eval_loss = eval_loss / nb_eval_steps
-#     preds = preds[0]
-#     preds = np.argmax(preds, axis=1)
-#     result = compute_metrics(task_name, preds, all_label_ids.numpy())
-#     loss = tr_loss / nb_tr_steps if args.do_train else None
-
-#     result["eval_loss"] = eval_loss
-#     result["global_step"] = global_step
-#     result["loss"] = loss
-
-#     output_eval_file = os.path.join(
-#         args.output_dir + "-MM", "eval_results.txt")
-#     with open(output_eval_file, "w") as writer:
-#         logger.info("***** Eval results *****")
-#         for key in sorted(result.keys()):
-#             logger.info("  %s = %s", key, str(result[key]))
-#             writer.write("%s = %s\n" % (key, str(result[key])))

@@ -21,7 +21,7 @@ from ecosys.utils.eval import compute_metrics
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
     datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO,
+    level=logging.DEBUG,
 )
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,11 @@ def model_init():
     # model.half()
     return model
 
+from deepspeed.pipe import PipelineModule
+# net = PipelineModule(layers=net, num_stages=2)
+
 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, return_dict=True)
+model.base_model = PipelineModule(layers=model.base_model.modules(), num_stages=2)
 
 def BERT_hp_space(trial):
     return {

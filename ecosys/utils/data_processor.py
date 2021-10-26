@@ -165,7 +165,7 @@ class ColaProcessor(DataProcessor):
         # print(tsv)
         # exit()
         tsv = tsv.dropna()
-        tsv['sentence'] = " [CLS] " + tsv.sentence + " [SEP] "
+        tsv['sentence'] = " <|endoftext|> " + tsv.sentence + " <|endoftext|> "
         # tsv['label'] = tsv['label'].astype(float)
         return tsv
 
@@ -178,14 +178,14 @@ class ColaProcessor(DataProcessor):
     def get_dev_tsv(self, data_dir):
         tsv = pd.read_csv(os.path.join(data_dir, "dev.tsv"), sep='\t', index_col=False, names=["misc", "label", "misc2", "sentence"])[["label", "sentence"]]
         tsv = tsv.dropna()
-        tsv['sentence'] = " [CLS] " + tsv.sentence + " [SEP] "
+        tsv['sentence'] = " <|endoftext|> " + tsv.sentence + " <|endoftext|> "
         # tsv['label'] = tsv['label'].astype(float)
         return tsv
 
     def get_test_tsv(self, data_dir):
         tsv = pd.read_csv(os.path.join(data_dir, "test.tsv"), sep='\t', index_col=False, header=0)
         tsv = tsv.dropna()
-        tsv['sentence'] = " [CLS] " + tsv.sentence + " [SEP] "
+        tsv['sentence'] = " [CLS] " + tsv.sentence + " [EOS] "
         tsv = tsv.rename(columns={"index": "id"})
         return tsv
 

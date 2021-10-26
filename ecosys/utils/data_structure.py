@@ -2,7 +2,7 @@ import torch
 import csv
 
 device = torch.device(
-    "cuda:1" if torch.cuda.is_available() else "cpu"
+    "cuda" if torch.cuda.is_available() else "cpu"
 )
 
 class ViTDataset(torch.utils.data.Dataset):

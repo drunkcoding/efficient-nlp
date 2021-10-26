@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package ecosys;
+
+message Message {
+    Head head = 1;
+    Body body = 2;
+};
+
+message Head {
+    uint32 version = 1;
+    uint32 magic_flag = 2;  // protocal validation
+    uint32 random_num = 3;
+    uint32 flow_no = 4;     // [unique, fixed, sender] in async req/res find corresponding message
+    string session_no = 5;  // [unique, fixed, sender]
+    string client_ip = 20; // [fixed, sender)
+    string target_ip = 30; // for request redirect
+};
+
+service ModelInference {
+   rpc QueryInference (ModelInferenceRequest) returns (ModelInferenceResponse);
+}
+
+message ModelInferenceRequest {
+    Head head = 1;
+    map<string, bytes> input_batch = 10; 
+    TaskType task_type = 100;
+};
+
+message ModelInferenceResponse {
+    Head head = 1;
+    int32 retcode = 10;
+    oneof payload {
+        bytes logits = 100;
+        string error_message = 101; 
+    }
+    uint32 power = 200;       
+};
+
+enum TaskType {
+    TASK_CLASSIFICATION = 0;
+    TASK_REGRESSION = 1;
+}
+
+message TokenBatch {
+    bytes input_ids = 1;
+    bytes attension_mask = 2;
+    bytes token_type_ids  = 3;
+}
+
+message ImageBatch {
+    bytes image = 1;
+}
+
+
+// 消息体所有的内容都是可选的，需要配合消息头中的message_type进行检查，
+// 必须有一个消息体
+message Body {
+    SimpleResponse simple_response = 1;
+    HeartBeatRequest heart_beat_request = 3;
+    HeartBeatResponse heart_beat_response = 5;
+    ModelInferenceRequest  model_inference_request  = 100001;
+    ModelInferenceResponse model_inference_response = 100002;
+};
+
+enum MessageType {
+    SIMPLE_RESPONSE = 0;
+    HEART_BEAT_REQUEST = 12;
+    HEART_BEAT_RESPONSE = 13;
+
+    MODEL_INFERENCE_REQUEST  = 230001;
+    MODEL_INFERENCE_RESPONSE = 230002;
+
+    GET_CONFIDENCE_THRESHOLD_REQUEST  = 230003;
+    GET_CONFIDENCE_THRESHOLD_RESPONSE = 230004;
+};
+
+// 公共的一些数据结构
+message IpPortPair {
+    uint32 ip = 1;
+    uint32 port = 2;
+};
+
+// 通用的返回码
+message ResponseCode {
+    int32 retcode = 1;                 // 返回值
+    string error_message = 2;          // 当返回值不为0时，包含错误信息
+};
+
+// IP地址信息
+message IpAddress {
+    string ip = 1;                     // IP地址
+    uint32 type = 2;                   // IP类型，可能是内网、BGP、电信、联通、移动、东方有线、电信通等等
+};
+
+// 简单的返回包
+message SimpleResponse {
+    ResponseCode rc = 1;
+};
+
+// 心跳请求，有效载荷由通信的双方协定
+message HeartBeatRequest {
+    repeated bytes payload = 1;
+};
+
+// 心跳应答，有效载荷由通信的双方协定
+message HeartBeatResponse {
+    ResponseCode rc = 1;
+    repeated bytes payload = 2;
+};
+

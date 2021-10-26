@@ -1,0 +1,21 @@
+name: serving
+channels:
+  - pytorch-lts
+  - nvidia
+  - intel
+dependencies:
+  - python=3.8
+  - protobuf
+  - grpcio
+  - grpcio-tools
+  - pytorch
+  - tqdm
+  - scikit-learn
+  - torchvision
+  - cudnn
+  - cudatoolkit=11.1
+  - pip:
+    - transformers
+    - deepspeed
+    - gpustat
+    - build
