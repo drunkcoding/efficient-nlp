@@ -13,17 +13,17 @@ os.environ['TOKENIZERS_PARALLELISM'] = "false"
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
 
-from ecosys.utils.logger import Logger
+from ecosys.context.logger import Logger
 from ecosys.utils.data_processor import processors, output_modes
 from ecosys.utils.data_structure import HuggingFaceDataset
 
-logger = Logger(__file__, "info", "w")
+logger = Logger(__file__, "info", 0, 0)
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 feature_size = 768
 sequence_length = 128
-task_name = 'QQP'
+task_name = 'CoLA'
 batch_size = 32
 
 base_dir = "/home/oai/share"
@@ -36,8 +36,8 @@ model_keys = [
 ]
 
 model_paths = [
-    f"{base_dir}/HuggingFace/distilbert-base-uncased",
-    f"{base_dir}/HuggingFace/bert-base-uncased",
+    f"{base_dir}/HuggingFace/distilbert-base-uncased-{task_name}",
+    f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}",
     f"{base_dir}/HuggingFace/bert-large-uncased",
 ]
 
@@ -69,7 +69,7 @@ encoded_texts = tokenizer(
     max_length=sequence_length, 
     return_tensors = 'pt'
 )
-dataset = HuggingFaceDataset(encoded_texts, torch.tensor(texts['label'].to_list()))
+dataset = HuggingFaceDataset(encoded_texts, torch.tensor(texts['label'].to_list()), device)
 sampler = SequentialSampler(dataset)
 
 logger.info("n_samples %s", len(dataset))

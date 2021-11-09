@@ -2,10 +2,6 @@ import functools
 import torch
 from tqdm import tqdm
 
-from ..utils.logger import Logger
-
-logger = Logger(__file__, "info", "a")
-
 # def parametrized(dec):
 #     def layer(*args, **kwargs):
 #         def repl(f):

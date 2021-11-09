@@ -8,37 +8,44 @@ import logging
 import numpy as np
 from outliers import smirnov_grubbs as grubbs
 import seaborn as sns
+import matplotlib
 import matplotlib.pyplot as plt
+from sklearn.mixture import GaussianMixture
+from scipy.optimize import minimize
 
 import os
 import sys
 import pandas as pd
-from ecosys.context.arg_parser import ArgParser
-from ecosys.context.srv_ctx import ServiceContext
 
-os.environ['TOKENIZERS_PARALLELISM'] = "false"
-
+from torch.nn.modules.activation import Threshold
+# sys.path.append(os.path.join(os.path.dirname(__file__), "../"))
+import ecosys
+from ecosys.decorators.profile import profile_flops
+from ecosys.models.temperature_scaling import ModelWithTemperature
+from ecosys.protos.ecosys_pb2 import Head, ModelInferenceRequest, TaskType
+from ecosys.protos.ecosys_pb2_grpc import ModelInferenceStub
 from ecosys.utils.data_processor import processors, output_modes
 from ecosys.utils.data_structure import Dataset, HuggingFaceDataset
 from ecosys.algo.monte_carlo import monte_carlo_bounds
 from ecosys.decorators.eval_decorators import model_eval
-from ecosys.evaluation.metrics import compute_metrics
+from ecosys.utils.eval import compute_metrics
+from ecosys.utils.logger import Logger
 
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from torch.utils.data import DataLoader, SequentialSampler, dataloader
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset, dataloader
 from sklearn.model_selection import train_test_split
-
-
-from network_attached_model import NetworkAttachedModel
 
 feature_size = 768
 sequence_length = 128
 task_name = 'CoLA'
 batch_size = 1
 
-args = ArgParser().parse()
-ctx = ServiceContext(args.cfg)
+filename = __file__
+filename = filename.split(".")[0]
+logger = Logger(filename, 'INFO', 'a')
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 base_dir = "/home/oai/share"
 tokenizer = AutoTokenizer.from_pretrained(f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}")
@@ -49,9 +56,9 @@ processor = processors[task_name.lower()]()
 output_mode = output_modes[task_name.lower()]
 
 def data_preprocessing():
-    train = processor.get_train_tsv(f'/data/GlueData/{task_name}/').reset_index()
-    test = processor.get_dev_tsv(f'/data/GlueData/{task_name}/').reset_index()
-    # train, test = train_test_split(texts, test_size=0.5, random_state=0)
+    texts = processor.get_train_tsv(f'/data/GlueData/{task_name}/').reset_index()
+
+    train, test = train_test_split(texts, test_size=0.5, random_state=0)
 
     encoded_texts = tokenizer(
         train["sentence"].to_list(), 
@@ -62,7 +69,7 @@ def data_preprocessing():
     )
     # print(encoded_texts)
     # exit()
-    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(train['label'].to_list()), ctx.cfg.srv_device)
+    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(train['label'].to_list()))
     sampler = SequentialSampler(dataset)
     train_dataloader = DataLoader(
         dataset, sampler=sampler, batch_size=batch_size
@@ -75,7 +82,7 @@ def data_preprocessing():
         max_length=sequence_length, 
         return_tensors = 'pt'
     )
-    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(test['label'].to_list()), ctx.cfg.srv_device)
+    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(test['label'].to_list()))
     sampler = SequentialSampler(dataset)
     test_dataloader = DataLoader(
         dataset, sampler=sampler, batch_size=batch_size
@@ -87,73 +94,64 @@ m = torch.nn.Softmax(dim=1)
 
 train_dataloader, test_dataloader = data_preprocessing()
 
-model = AutoModelForSequenceClassification.from_pretrained(f"{base_dir}/HuggingFace/distilbert-base-uncased-{task_name}")
-model = NetworkAttachedModel(model, ctx)
+data_limit = 1000
 
-print('initialized')
+def request_iterator(dataloader, delay) -> Iterable[ModelInferenceRequest]:
+    # print('ssssssssssssssssssss')
+    # requests = []
+    for input, _ in tqdm(dataloader, desc="Inference"):
+        for key in input:
+            output = BytesIO()
+            np.save(output, input[key].cpu().detach().numpy(), allow_pickle=False)
+            input[key] = output.getvalue()
+        req = ModelInferenceRequest(
+            head = Head(),
+            input_batch = input,
+            task_type= TaskType.TASK_CLASSIFICATION,
+        )
+        # print('aaaaaaaaaaaaaaa')
+        yield req
+        # requests.append(req)
+        sleep(delay)
+    # for req in requests:
 
-print('data prepared')
-# model.to(ctx.cfg.srv_device)
+channel = grpc.insecure_channel('localhost:50051')
+stub = ModelInferenceStub(channel)
 
-for input, label in tqdm(train_dataloader, desc="Inference Submit"):
-    _ = model(input)
-
-# def request_iterator(dataloader, delay) -> Iterable[ModelInferenceRequest]:
-#     # print('ssssssssssssssssssss')
-#     # requests = []
-#     for input, _ in tqdm(dataloader, desc="Inference"):
-#         for key in input:
-#             output = BytesIO()
-#             np.save(output, input[key].cpu().detach().numpy(), allow_pickle=False)
-#             input[key] = output.getvalue()
-#         req = ModelInferenceRequest(
-#             head = Head(),
-#             input_batch = input,
-#             task_type= TaskType.TASK_CLASSIFICATION,
-#         )
-#         # print('aaaaaaaaaaaaaaa')
-#         yield req
-#         # requests.append(req)
-#         sleep(delay)
-#     # for req in requests:
-
-# channel = grpc.insecure_channel('localhost:50051')
-# stub = ModelInferenceStub(channel)
-
-# texts = processor.get_train_tsv(f'/data/GlueData/{task_name}/').reset_index()
-# encoded_texts = tokenizer(
-#     texts["sentence"].to_list(), 
-#     padding = 'max_length', 
-#     truncation = True, 
-#     max_length=sequence_length, 
-#     return_tensors = 'pt'
-# )
-# dataset = HuggingFaceDataset(encoded_texts, torch.tensor(texts['label'].to_list()))
-# sampler = SequentialSampler(dataset)
+texts = processor.get_train_tsv(f'/data/GlueData/{task_name}/').reset_index()
+encoded_texts = tokenizer(
+    texts["sentence"].to_list(), 
+    padding = 'max_length', 
+    truncation = True, 
+    max_length=sequence_length, 
+    return_tensors = 'pt'
+)
+dataset = HuggingFaceDataset(encoded_texts, torch.tensor(texts['label'].to_list()))
+sampler = SequentialSampler(dataset)
 
 
-# power_samples = {}
-# for batch_size in [1,2,4,8,16,32,64]:
-#     dataloader = DataLoader(
-#         dataset, sampler=sampler, batch_size=batch_size
-#     )
-#     power_samples[batch_size] = []
-#     cnt = 0
-#     # rsp_future = []
-#     # for req in request_iterator(dataloader, 0.01):
-#     #     rsp = stub.QueryInference.future(req)
-#     #     rsp_future.append(rsp)
-#     rsp_future = stub.QueryInference(request_iterator(dataloader, 0.01))
-#     for response in tqdm(rsp_future, desc='Fetching Result'):
-#         rsp = response# .result() 
-#         power_samples[batch_size].append(rsp.power)
-#         cnt += batch_size
-#         if cnt % 1000 == 0:
-#             logger.info('bsz %s, average power %s', batch_size, np.mean(power_samples[batch_size]))
-# for key in power_samples:
-#     power_samples[key] = [np.max(power_samples[key])]
-# df = pd.DataFrame(power_samples)
-# df.to_csv('power_samples_d1e-2.csv')
+power_samples = {}
+for batch_size in [1,2,4,8,16,32,64]:
+    dataloader = DataLoader(
+        dataset, sampler=sampler, batch_size=batch_size
+    )
+    power_samples[batch_size] = []
+    cnt = 0
+    # rsp_future = []
+    # for req in request_iterator(dataloader, 0.01):
+    #     rsp = stub.QueryInference.future(req)
+    #     rsp_future.append(rsp)
+    rsp_future = stub.QueryInference(request_iterator(dataloader, 0.01))
+    for response in tqdm(rsp_future, desc='Fetching Result'):
+        rsp = response# .result() 
+        power_samples[batch_size].append(rsp.power)
+        cnt += batch_size
+        if cnt % 1000 == 0:
+            logger.info('bsz %s, average power %s', batch_size, np.mean(power_samples[batch_size]))
+for key in power_samples:
+    power_samples[key] = [np.max(power_samples[key])]
+df = pd.DataFrame(power_samples)
+df.to_csv('power_samples_d1e-2.csv')
 
 # power_samples = {}
 # batch_size = 1

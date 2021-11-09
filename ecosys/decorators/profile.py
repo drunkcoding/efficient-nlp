@@ -3,10 +3,6 @@ import torch
 from tqdm import tqdm
 from deepspeed.profiling.flops_profiler.profiler import FlopsProfiler
 
-from ..utils.logger import Logger
-
-logger = Logger(__file__, "info", "a")
-
 def profile_flops(func):
     @functools.wraps(func)
     def wrapper_profile_flops(*args, **kwargs):

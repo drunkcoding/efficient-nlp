@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package ecosys;
+
+message Message {
+    Head head = 1;
+    Body body = 2;
+};
+
+message Head {
+    uint32 random_num = 3;
+    uint32 flow_no = 4;     // [unique, fixed, sender] in async req/res find corresponding message
+    string session_no = 5;  // [unique, fixed, sender]
+};
+
+message Body {
+    oneof payload {
+        SimpleResponse simple_response = 1;
+
+        QueryInferenceRequest  query_inference_request  = 100001;
+        QueryInferenceResponse query_inference_response = 100002;
+
+        PushConfidenceRequest push_confidence_request = 100003;
+        // push confidence has simple response
+
+
+    }
+};
+
+service ModelInference {
+   rpc QueryInferenceStream (stream Message) returns (stream Message);
+   rpc QueryInference (Message) returns (Message);
+   rpc PushConfidence (Message) returns (Message);
+}
+
+message PushConfidenceRequest {
+    float threshold = 1;
+}
+
+// service CoordinatorManagement {
+//     rpc RegisterModel (RegisterModelRequest) returns (RegisterModelResponse);
+// }
+
+// enum TaskType {
+//     TASK_CLASSIFICATION = 0;
+//     TASK_REGRESSION = 1;
+// }
+
+// message TokenBatch {
+//     bytes input_ids = 1;
+//     bytes attension_mask = 2;
+//     bytes token_type_ids  = 3;
+// }
+
+// message ImageBatch {
+//     bytes image = 1;
+// }
+
+
+
+
+// 公共的一些数据结构
+message IpPortPair {
+    uint32 ip = 1;
+    uint32 port = 2;
+};
+
+// 通用的返回码
+message ResponseCode {
+    RetCode retcode = 1;                 // return code
+    string error_message = 2;          // non-empty when return code is not zero
+};
+
+// 简单的返回包
+message SimpleResponse {
+    ResponseCode rc = 1;
+};
+
+// 心跳请求，有效载荷由通信的双方协定
+message HeartBeatRequest {
+    repeated bytes payload = 1;
+};
+
+// 心跳应答，有效载荷由通信的双方协定
+message HeartBeatResponse {
+    ResponseCode rc = 1;
+    repeated bytes payload = 2;
+};
+
+message QueryInferenceRequest {
+    map<string, bytes> input_batch = 10;
+    bytes label = 11;
+    // TaskType task_type = 100;
+    // TaskType task_name = 101;
+};
+
+message QueryInferenceResponse {
+    int32 retcode = 10;
+    oneof payload {
+        bytes logits = 100;
+        string error_message = 101; 
+    }
+    repeated EnergyInfo energy_info = 200;       
+};
+
+message GPUStat {
+    float power = 2;
+    float timestamp = 3;
+    float utilization = 4;
+    float mem_used = 5;
+    float mem_total = 6;
+}
+
+message EnergyInfo {
+    repeated GPUStat gpu_stats = 1;
+    float latency = 2;
+}
+
+message RegisterModelRequest {
+    uint32 model_id = 1;    // md5checksum of model checkpoint
+    string model_name = 2;  // huggingface name or get attr name
+    uint32 model_size = 3;  // model checkpoint size
+};
+
+message RegisterModelResponse {
+    int32 retcode = 10;
+    oneof payload {
+        string error_message = 11;
+        double threshold = 12;
+    }       
+};
+
+
+enum DeployType {
+    DEPLOY_TINY  = 0;
+    DEPLOY_MOBILE = 1;
+};
+
+enum RetCode {
+    SUCCESS  = 0;
+    ERR_MISMATCH_MESSAGE = -100;
+};

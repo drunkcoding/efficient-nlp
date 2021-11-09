@@ -1,0 +1,8 @@
+protobuf
+grpcio
+grpcio-tools
+kazoo
+build
+pysocks
+mysql-connector-python
+kubernetes
