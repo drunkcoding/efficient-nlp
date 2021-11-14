@@ -1,0 +1,22 @@
+package:
+  name: ecosys
+  version: "0.0.1"
+source:
+  path: ./ecosys
+build:
+  noarch: python
+
+test:
+  imports:
+    - ecosys
+
+about:
+  home: https://github.com/shibukawa/imagesize_py
+  license: MIT
+  summary: 'Getting image size from png/jpeg/jpeg2000/gif file'
+  description: |
+    This module analyzes jpeg/jpeg2000/png/gif image header and
+    return image size.
+  dev_url: https://github.com/shibukawa/imagesize_py
+  doc_url: https://pypi.python.org/pypi/imagesize
+  doc_source_url: https://github.com/shibukawa/imagesize_py/blob/master/README.rst

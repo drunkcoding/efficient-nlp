@@ -31,6 +31,8 @@ message Body {
 
         ReportMetricsRequest report_metrics_request = 100007;
         // simple response
+
+        ReportMetaRequest report_meta_request = 100009;
     }
 };
 
@@ -41,6 +43,7 @@ service Model {
 
 // message PushConfidenceRequest {
 //     float threshold = 1;
+//     float temperature = 2;
 // }
 
 service Coordinator {
@@ -60,11 +63,9 @@ message SimpleResponse {
 };
 
 message InferenceRequest {
-    map<string, bytes> input_batch = 10;
+    map<string, bytes> input_batch = 1;
     bytes label = 11;
     bool temp_scale = 12;
-    // TaskType task_type = 100;
-    // TaskType task_name = 101;
 };
 
 message InferenceResponse {
@@ -78,13 +79,14 @@ message ReportMetricsRequest {
     GPUStat gpu_stats = 2;
     uint32 num_query = 3;
     uint32 batch_size = 4;
+    uint32 ctx_id = 5;
 };
 
 message ReportMetaRequest {
     string model_name = 1;
-    float temperature = 2;
-    bytes true_labels = 10;
-    bytes pred_labels = 11;
+    bytes labels = 10;
+    bytes outputs = 11;
+    // TODO regression support
 };
 
 message GPUStat {
@@ -102,6 +104,7 @@ message EnergyInfo {
 
 message RegisterModelRequest {
     string model_name = 1;  // huggingface name or get attr name
+    // bool force = 10;
     // uint32 model_size = 3;  // model checkpoint size
 };
 
@@ -115,4 +118,5 @@ enum RetCode {
     SUCCESS  = 0;
     ERR_MISMATCH_MESSAGE = -100;
     ERR_NOT_INITIALIZED = -200;
+    ERR_DATA_INCOMPLETE = -300;
 }
