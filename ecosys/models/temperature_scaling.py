@@ -3,7 +3,7 @@ from torch import nn, optim
 
 from tqdm import tqdm
 
-from .criterion import ECELoss
+from ..evaluation.criterion import ECELoss
 
 class ModelWithTemperature(nn.Module):
     """

@@ -1,53 +1,85 @@
 import torch
-import asyncio
-import threading
+from torch.utils.data import DataLoader, SequentialSampler
 from transformers import AutoModelForSequenceClassification
 from ecosys.context.arg_parser import ArgParser
+from ecosys.utils.data_structure import HuggingFaceDataset
 from network_attached_model import NetworkAttachedModel
-# from ecosys.sysstat.gpu import measure_gpu_power
 from ecosys.context.srv_ctx import ServiceContext
+from ecosys.utils.data_processor import processors, output_modes
 
-# logger = Logger(__file__, 'INFO', 'a')
-# device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+import threading
+from transformers import AutoTokenizer
+from sklearn.model_selection import train_test_split
 
-# lock = threading.Lock()
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = "false"
 
-# async def power_generator():
-#     while lock.locked():
-#         await asyncio.sleep(0.1)
-#         yield measure_gpu_power()
+args = ArgParser().parse()
+ctx = ServiceContext(args.cfg)
 
-# async def measure_power(key):
-#     async for p in power_generator():
-#         logger.info('%s power %s', key, p)
+sequence_length = 128
+task_name = 'SST-2'
+
+batch_size = ctx.cfg.model_bsz
+
+base_dir = "/home/oai/share"
+tokenizer = AutoTokenizer.from_pretrained(
+    f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}")
+
+# -------------  Dataset Prepare --------------
+
+processor = processors[task_name.lower()]()
+output_mode = output_modes[task_name.lower()]
+
+
+def data_preprocessing():
+    # train = processor.get_train_tsv(
+    #     f'/data/GlueData/{task_name}/').reset_index()
+    texts = processor.get_dev_tsv(f'/data/GlueData/{task_name}/').reset_index()
+    train, test = train_test_split(texts, test_size=0.5, random_state=0)
+
+    encoded_texts = tokenizer(
+        train["sentence"].to_list(),
+        padding='max_length',
+        truncation=True,
+        max_length=sequence_length,
+        return_tensors='pt'
+    )
+    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(
+        train['label'].to_list()), ctx.cfg.srv_device)
+    sampler = SequentialSampler(dataset)
+    train_dataloader = DataLoader(
+        dataset, sampler=sampler, batch_size=batch_size
+    )
+
+    encoded_texts = tokenizer(
+        test["sentence"].to_list(),
+        padding='max_length',
+        truncation=True,
+        max_length=sequence_length,
+        return_tensors='pt'
+    )
+    dataset = HuggingFaceDataset(encoded_texts, torch.tensor(
+        test['label'].to_list()), ctx.cfg.srv_device)
+    sampler = SequentialSampler(dataset)
+    test_dataloader = DataLoader(
+        dataset, sampler=sampler, batch_size=batch_size
+    )
+
+    return train_dataloader, test_dataloader
+
+
+m = torch.nn.Softmax(dim=1)
+
+train_dataloader, test_dataloader = data_preprocessing()
+
 
 if __name__ == "__main__":
-
-    base_dir = "/home/oai/share"
-    task_name = 'CoLA'
-    # batch_size = 32
-
-    # lock.acquire()
-    # loop = asyncio.new_event_loop()
-    # loop.run_until_complete(measure_power('base'))
-
-    # sleep(10)
-    # lock.release()
-
-    # sleep(1)
-    # loop.close()
-
-    # lock.acquire()
-    # loop = asyncio.new_event_loop()
-    # loop.run_until_complete(measure_power('serving'))
-
-
-    args = ArgParser().parse()
-    ctx = ServiceContext(args.cfg)
-
     model = NetworkAttachedModel(
-        AutoModelForSequenceClassification.from_pretrained(f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}", return_dict=True),
+        AutoModelForSequenceClassification.from_pretrained(ctx.cfg.model_path, return_dict=True),
         ctx
     )
-    model.serve()
+    model.monitor()
+    model.prepare(train_dataloader)
+    model.serve(True)
     

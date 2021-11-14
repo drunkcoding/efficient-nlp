@@ -8,99 +8,83 @@ message Message {
 };
 
 message Head {
+    uint32 ctx_id = 1;
     uint32 random_num = 3;
     uint32 flow_no = 4;     // [unique, fixed, sender] in async req/res find corresponding message
     string session_no = 5;  // [unique, fixed, sender]
 };
 
 message Body {
+    // SimpleResponse must have index 1
+    // response index must be request index +1
     oneof payload {
         SimpleResponse simple_response = 1;
 
-        QueryInferenceRequest  query_inference_request  = 100001;
-        QueryInferenceResponse query_inference_response = 100002;
+        InferenceRequest  inference_request  = 100001;
+        InferenceResponse inference_response = 100002;
 
-        PushConfidenceRequest push_confidence_request = 100003;
-        // push confidence has simple response
+        // PushConfidenceRequest push_confidence_request = 100003;
+        // simple response
 
+        RegisterModelRequest register_model_request = 100005;
+        RegisterModelResponse register_model_response = 100006;
 
+        ReportMetricsRequest report_metrics_request = 100007;
+        // simple response
     }
 };
 
-service ModelInference {
-   rpc QueryInferenceStream (stream Message) returns (stream Message);
-   rpc QueryInference (Message) returns (Message);
-   rpc PushConfidence (Message) returns (Message);
+service Model {
+//    rpc QueryInferenceStream (stream Message) returns (stream Message);
+   rpc Inference (Message) returns (Message);
 }
 
-message PushConfidenceRequest {
-    float threshold = 1;
+// message PushConfidenceRequest {
+//     float threshold = 1;
+// }
+
+service Coordinator {
+    rpc RegisterModel (Message) returns (Message);
+    rpc ReportMetrics (Message) returns (Message);
+    rpc ReportMeta (Message) returns (Message);
 }
 
-// service CoordinatorManagement {
-//     rpc RegisterModel (RegisterModelRequest) returns (RegisterModelResponse);
-// }
-
-// enum TaskType {
-//     TASK_CLASSIFICATION = 0;
-//     TASK_REGRESSION = 1;
-// }
-
-// message TokenBatch {
-//     bytes input_ids = 1;
-//     bytes attension_mask = 2;
-//     bytes token_type_ids  = 3;
-// }
-
-// message ImageBatch {
-//     bytes image = 1;
-// }
-
-
-
-
-// 公共的一些数据结构
-message IpPortPair {
-    uint32 ip = 1;
-    uint32 port = 2;
-};
-
-// 通用的返回码
+// every response must contain this field
 message ResponseCode {
     RetCode retcode = 1;                 // return code
     string error_message = 2;          // non-empty when return code is not zero
 };
 
-// 简单的返回包
 message SimpleResponse {
     ResponseCode rc = 1;
 };
 
-// 心跳请求，有效载荷由通信的双方协定
-message HeartBeatRequest {
-    repeated bytes payload = 1;
-};
-
-// 心跳应答，有效载荷由通信的双方协定
-message HeartBeatResponse {
-    ResponseCode rc = 1;
-    repeated bytes payload = 2;
-};
-
-message QueryInferenceRequest {
+message InferenceRequest {
     map<string, bytes> input_batch = 10;
     bytes label = 11;
+    bool temp_scale = 12;
     // TaskType task_type = 100;
     // TaskType task_name = 101;
 };
 
-message QueryInferenceResponse {
-    int32 retcode = 10;
-    oneof payload {
-        bytes logits = 100;
-        string error_message = 101; 
-    }
-    repeated EnergyInfo energy_info = 200;       
+message InferenceResponse {
+    ResponseCode rc = 1;
+    bytes logits = 10;
+    // repeated EnergyInfo energy_info = 200;       
+};
+
+message ReportMetricsRequest {
+    string model_name = 1;
+    GPUStat gpu_stats = 2;
+    uint32 num_query = 3;
+    uint32 batch_size = 4;
+};
+
+message ReportMetaRequest {
+    string model_name = 1;
+    float temperature = 2;
+    bytes true_labels = 10;
+    bytes pred_labels = 11;
 };
 
 message GPUStat {
@@ -117,26 +101,18 @@ message EnergyInfo {
 }
 
 message RegisterModelRequest {
-    uint32 model_id = 1;    // md5checksum of model checkpoint
-    string model_name = 2;  // huggingface name or get attr name
-    uint32 model_size = 3;  // model checkpoint size
+    string model_name = 1;  // huggingface name or get attr name
+    // uint32 model_size = 3;  // model checkpoint size
 };
 
 message RegisterModelResponse {
-    int32 retcode = 10;
-    oneof payload {
-        string error_message = 11;
-        double threshold = 12;
-    }       
-};
-
-
-enum DeployType {
-    DEPLOY_TINY  = 0;
-    DEPLOY_MOBILE = 1;
+    ResponseCode rc = 1;
+    float threshold = 10;
+    float temperature = 11;    
 };
 
 enum RetCode {
     SUCCESS  = 0;
     ERR_MISMATCH_MESSAGE = -100;
-};
+    ERR_NOT_INITIALIZED = -200;
+}

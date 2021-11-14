@@ -4,11 +4,8 @@ import deepspeed
 
 class ArgParser(argparse.ArgumentParser):
 
-    _instance = None
-    _lock = threading.Lock()
-
-    def __init__(self):
-        super(ArgParser, self).__init__()
+    def __init__(self, *args, **kwargs):
+        super(ArgParser, self).__init__(*args, **kwargs)
 
         self.add_argument(
             "--cfg",
@@ -22,12 +19,15 @@ class ArgParser(argparse.ArgumentParser):
         args = self.parse_args()
         return args
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            with cls._lock:
-                if not cls._instance:
-                    cls._instance = super(ArgParser, cls).__new__(cls)
-                return cls._instance
+    # _instance = None
+    # _lock = threading.Lock()
+
+    # def __new__(cls, *args, **kwargs):
+    #     if not cls._instance:
+    #         with cls._lock:
+    #             if not cls._instance:
+    #                 cls._instance = super(ArgParser, cls).__new__(cls)
+    #             return cls._instance
 
 if __name__ == "__main__":
     parser = ArgParser()

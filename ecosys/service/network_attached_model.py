@@ -6,8 +6,8 @@ from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 
 import grpc
-from ecosys.protos.ecosys_pb2 import MessageType, ModelInferenceResponse, Head
-from ecosys.protos.ecosys_pb2_grpc import ModelInferenceServicer, add_ModelInferenceServicer_to_server
+from protos.ecosys_pb2 import MessageType, ModelInferenceResponse, Head
+from protos.ecosys_pb2_grpc import ModelInferenceServicer, add_ModelInferenceServicer_to_server
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

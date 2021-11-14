@@ -9,6 +9,13 @@ from tqdm import tqdm
 #         return repl
 #     return layer
 
+def no_grad(func):
+    @functools.wraps(func)
+    def wrapper_no_grad(*args, **kwargs):
+        with torch.no_grad():
+            return func(*args, **kwargs)
+    return wrapper_no_grad
+
 def model_eval(dataloader):
     def model_eval_decorator(func):
         @functools.wraps(func)

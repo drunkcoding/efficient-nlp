@@ -19,8 +19,8 @@ from ecosys.models.temperature_scaling import ModelWithTemperature
 from ecosys.utils.data_processor import processors, output_modes
 from ecosys.utils.data_structure import Dataset, HuggingFaceDataset
 from ecosys.algo.monte_carlo import monte_carlo_bounds
-from ecosys.decorators.eval_decorators import model_eval
-from ecosys.utils.eval import compute_metrics
+from ecosys.decorators.eval import model_eval
+from ecosys.evaluation.metrics import compute_metrics
 
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -45,6 +45,8 @@ fh = logging.FileHandler(f'{filename}_{task_name}.log', mode='a')
 fh.setLevel(logging.INFO)
 logger.addHandler(fh)
 
+print("init")
+
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 base_dir = "/home/oai/share"
@@ -54,13 +56,13 @@ tokenizer = AutoTokenizer.from_pretrained(f"{base_dir}/HuggingFace/bert-base-unc
 model_keys = [
     "S", 
     "M", 
-    "L",
+    # "L",
 ]
 
 energy_discount_factor = [
     1, 
-    10, 
-    50,
+    2, 
+    # 50,
 ]
 
 model_paths = [
@@ -71,7 +73,7 @@ model_paths = [
     f"{base_dir}/HuggingFace/bert-base-uncased-{task_name}",
     # f"/home/oai/efficient-nlp/outputs/bert-base-uncased/QNLIFineTune_bsz_lr_epoch2_QNLI/checkpoint-3000",
     # f"/home/oai/efficient-nlp/outputs/bert-base-uncased/QQPFineTune_bsz_lr_epoch2_QQP/checkpoint-11000",
-    "/home/oai/efficient-nlp/outputs/bert-large-uncased/FineTune_bsz_lr_epoch4_CoLA/checkpoint-132",
+    # "/home/oai/efficient-nlp/outputs/bert-large-uncased/FineTune_bsz_lr_epoch4_CoLA/checkpoint-132",
 ]
 
 model_energy = dict(zip(model_keys, energy_discount_factor))
@@ -84,15 +86,21 @@ for key in model_keys:
     models[key] = AutoModelForSequenceClassification.from_pretrained(model_paths[key]).to(device) # if key != "S" else DistilBertForSequenceClassification.from_pretrained(model_paths[key])
     models[key].eval()
 
+print("model loaded")
+
 # -------------  Dataset Prepare --------------
 
 processor = processors[task_name.lower()]()
 output_mode = output_modes[task_name.lower()]
 
 def data_preprocessing():
-    texts = processor.get_dev_tsv(f'/data/GlueData/{task_name}/').reset_index()
+    train = processor.get_train_tsv(
+        f'/data/GlueData/{task_name}/').reset_index()
+    test = processor.get_dev_tsv(f'/data/GlueData/{task_name}/').reset_index()
+    # # train, test = train_test_split(texts, test_size=0.5, random_state=0)
+    # texts = processor.get_dev_tsv(f'/data/GlueData/{task_name}/').reset_index()
 
-    train, test = train_test_split(texts, test_size=0.5, random_state=0)
+    # train, test = train_test_split(texts, test_size=0.5, random_state=0)
 
     encoded_texts = tokenizer(
         train["sentence"].to_list(), 
@@ -128,7 +136,7 @@ m = torch.nn.Softmax(dim=1)
 
 train_dataloader, test_dataloader = data_preprocessing()
 
-data_limit = 1000
+print("data loaded")
 
 # -------------  Train Temperature --------------
 
@@ -136,6 +144,8 @@ for key in model_keys:
     models[key] = ModelWithTemperature(models[key])
     models[key].set_logger(logger)
     models[key].set_temperature(train_dataloader)
+
+print("temperature loaded")
 
 n_models = len(model_keys)
 num_labels = 0
@@ -202,7 +212,7 @@ mc_threshold = np.min(
     threshold_bounds, axis=1
 )
 logger.info("Threshold Bounds %s", threshold_bounds)
-# exit()
+exit()
 
 # threshold = np.random.random(n_models) + 1
 # logger.info("threshold init %s", threshold)

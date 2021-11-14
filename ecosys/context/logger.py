@@ -5,15 +5,15 @@ import threading
 
 class Logger():
 
-    _instance = None
-    _lock = threading.Lock()
+    # _instance = None
+    # _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            with cls._lock:
-                if not cls._instance:
-                    cls._instance = super(Logger, cls).__new__(cls)
-                return cls._instance
+    # def __new__(cls, *args, **kwargs):
+    #     if not cls._instance:
+    #         with cls._lock:
+    #             if not cls._instance:
+    #                 cls._instance = super(Logger, cls).__new__(cls)
+    #             return cls._instance
 
     def __init__(self, file, level, rollsize, backup):        
         if level.lower() == "debug":
@@ -27,7 +27,7 @@ class Logger():
         self.logger.setLevel(self.level)
 
         format = logging.Formatter(
-            fmt="%(asctime)s - %(levelname)s - %(name)s [%(lineno)d] -   %(message)s",
+            fmt="%(asctime)s - %(levelname)s - %(process)d [%(filename)s - %(lineno)d] -   %(message)s",
             datefmt="%m/%d/%Y %H:%M:%S",
         )
 

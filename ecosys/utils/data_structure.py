@@ -3,6 +3,13 @@ import csv
 from collections import deque
 import threading
 
+def queue2list(queue):
+    data = []
+    try:
+        while queue.qsize() > 0: 
+            data.append(queue.get())
+    finally:
+        return data
 
 
 class ThreadSafeQueue():
