@@ -8,6 +8,8 @@ import deepspeed
 
 import os
 
+from transformers.utils.dummy_pt_objects import GPT2ForSequenceClassification
+
 from ecosys.algo.monte_carlo import monte_carlo_bounds
 
 # from transformers.models.auto.configuration_auto import AutoConfig
@@ -16,14 +18,14 @@ os.environ['TOKENIZERS_PARALLELISM'] = "false"
 os.environ['NUMEXPR_MAX_THREADS'] = '48'
 # os.environ["NCCL_SOCKET_IFNAME"] = "eno1"
 
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
-from transformers import AutoTokenizer, GPT2Tokenizer, GPT2ForSequenceClassification, AutoConfig
+from transformers import AutoTokenizer, GPT2Tokenizer, AutoModelForSequenceClassification, AutoConfig
 from transformers import Trainer, TrainingArguments
 
 from ecosys.utils.data_structure import Dataset
 from ecosys.utils.data_processor import processors, output_modes
-from ecosys.utils.eval import compute_metrics
+from ecosys.evaluation.metrics import compute_metrics
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -114,6 +116,7 @@ def initialize():
 
 args = initialize()
 
+print("arg parsed")
 # from accelerate import Accelerator
 # accelerator = Accelerator()
 # device = accelerator.device
@@ -132,7 +135,7 @@ output_mode = output_modes[task_name]
 # num_labels = len(label_list)
 num_labels=1
 
-model_name = f"/home/oai/share/HuggingFace/{args.model_name}/"
+model_name = f"/jmain01/home/JAD003/sxr06/lxx22-sxr06/HuggingFace/{args.model_name}/"
 
 # tokenizer = AutoTokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
 
@@ -145,7 +148,7 @@ def build_inputs_with_special_tokens(self, token_ids_0, token_ids_1=None):
 GPT2Tokenizer.build_inputs_with_special_tokens = build_inputs_with_special_tokens
 tokenizer = GPT2Tokenizer.from_pretrained(model_name, do_lower_case=args.do_lower_case)
 # set pad_token_id to unk_token_id -> be careful here as unk_token_id == eos_token_id == bos_token_id
-tokenizer.pad_token = tokenizer.unk_token
+tokenizer.pad_token = tokenizer.bos_token
 
 # SPECIAL_TOKENS  = { "bos_token": "[CLS]",
 #                     "eos_token": "[EOS]",
@@ -168,6 +171,8 @@ config = AutoConfig.from_pretrained(model_name, num_labels=1)
 
 # train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=max_length)
 
+model_id = model_name.split("/")[-1]
+
 training_args = TrainingArguments(
     num_train_epochs=args.num_train_epochs,
     per_device_train_batch_size=32,  # batch size per device during training
@@ -184,6 +189,8 @@ training_args = TrainingArguments(
     fp16_opt_level="O3",
     fp16_full_eval=True,
     warmup_steps=1e2,
+    logging_dir=f"tensorboard/{model_id}/{task_name}/",
+    deepspeed="deepspeed_cfg.json",
 )
 
 # -------------  Dataset Prepare --------------
@@ -218,20 +225,29 @@ encoded_dev_texts = tokenizer(
 train_dataset = Dataset(encoded_train_texts, torch.tensor(train_texts['label']))
 eval_dataset = Dataset(encoded_dev_texts, torch.tensor(dev_texts['label']))
 
-model = GPT2ForSequenceClassification.from_pretrained(model_name, config=config).cuda()
-model.resize_token_embeddings(len(tokenizer))
-model.config.pad_token_id = -100
+print("data prepared")
+
+model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+# model.resize_token_embeddings(len(tokenizer))
+model.config.pad_token_id = 50256
+
+print("model loaded")
+
+for param in model.transformer.parameters():
+    param.requires_grad = False
 
 print(model.config.num_labels)
 # exit()
+print("model freezed")
 
+# model = torch.nn.DataParallel(model)
 
 def compute_acc(predictions, labels, th):
     predictions = np.where(predictions > th[0], 1, 0)
     return compute_metrics(args.task_name.lower(), predictions, labels)['mcc']
 
 def metrics(eval_pred):
-    print(eval_pred)
+    # print(eval_pred)
     # predictions, labels = eval_pred
     predictions = eval_pred.predictions.reshape((-1, num_labels))
     labels = eval_pred.label_ids.flatten()
@@ -297,4 +313,5 @@ trainer = Trainer(
 )
 # trainer.hyperparameter_search(direction="maximize", n_trials=20, hp_space=BERT_hp_space, backend="optuna")
 trainer.train()
+
 

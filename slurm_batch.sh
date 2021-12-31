@@ -14,6 +14,10 @@
 # run_experiment -b slurm_arrayjob.sh -e experiments.txt -m 12
 # ```
 
+#SBATCH --mail-user=leyang.xue@ed.ac.uk
+#SBATCH --mail-type=ALL
+#SBATCH --gres=gpu:8
+#SBATCH --partition=big
 
 # ====================
 # Options for sbatch
@@ -100,9 +104,11 @@ echo "Moving input data to the compute node's scratch space: $SCRATCH_DISK"
 # you execute `sbatch --array=1:100 ...` the jobs will get numbers 1 to 100
 # inclusive.
 
+export TORCH_EXTENSIONS_DIR=${HOME}/torch_extensions
+
 # experiment_text_file=$1
 # COMMAND="`sed \"${SLURM_ARRAY_TASK_ID}q;d\" ${experiment_text_file}`"
-COMMAND="`bash run_glue_finetune.sh CoLA 10 FineTune gpt2`"
+COMMAND="`bash run_glue_finetune.sh QQP 5 FineTune gpt-neo-2.7B`"
 echo "Running provided command: ${COMMAND}"
 eval "${COMMAND}"
 echo "Command ran successfully!"
@@ -113,8 +119,8 @@ echo "Command ran successfully!"
 # ======================================
 echo "Moving output data back to DFS"
 
-src_path=${SCRATCH_HOME}/simple/data/output
-dest_path=${proj_home}/experiments/examples/simple/data/output
+# src_path=${SCRATCH_HOME}/simple/data/output
+# dest_path=${proj_home}/experiments/examples/simple/data/output
 # rsync --archive --update --compress --progress ${src_path}/ ${dest_path}
 
 
